@@ -867,7 +867,7 @@ const JoinRoomModal=({onClose,onRequest})=>{
           <div style={{background:"var(--surface)",border:"1px solid var(--dim)",padding:13,
             fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",lineHeight:1.8}}>
             ⚠ Entry requires admin approval even for public rooms.<br/>
-            Your role will be assigned by the room leader.
+            Main user approves entry, then leaders assign your personalized room.
           </div>
           <button className="btn btn-solid" style={{width:"100%"}} onClick={go} disabled={loading||code.length<4}>
             {loading?"REQUESTING...":"REQUEST ACCESS →"}
@@ -886,10 +886,18 @@ const RoomsView=({user,rooms,setRooms})=>{
   const [activeId,setActiveId]=useState(my[0]?.id||null);
   const [msg,setMsg]=useState("");
   const endRef=useRef(null);
+  useEffect(()=>{
+    if(!activeId||!my.find(r=>r.id===activeId))setActiveId(my[0]?.id||null);
+  },[my,activeId]);
   useEffect(()=>endRef.current?.scrollIntoView({behavior:"smooth"}),[activeId,rooms]);
   const active=rooms.find(r=>r.id===activeId);
+  const isMainRoom=active && !active.parentId;
+  const isMainUser=active && active.createdBy===user.id;
+  const isLeader=active && active.leaders.some(l=>l.id===user.id);
+  const isMember=active && active.members.some(m=>m.id===user.id);
+  const canPost=active && (isMainRoom ? (isMainUser||isLeader) : (isMainUser||isLeader||isMember));
   const send=()=>{
-    if(!msg.trim()||!active)return;
+    if(!msg.trim()||!active||!canPost)return;
     const m={id:Date.now(),user:user.name,role:user.role,avatar:user.avatar,text:msg.trim(),
       time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),reactions:{}};
     setRooms(rs=>rs.map(r=>r.id===active.id?{...r,messages:[...r.messages,m]}:r));
@@ -906,7 +914,7 @@ const RoomsView=({user,rooms,setRooms})=>{
   );
   return(
     <div style={{display:"flex",height:"calc(100vh - 52px)",animation:"fadeIn .3s"}}>
-      <div style={{width:205,background:"rgba(4,10,18,.96)",borderRight:"1px solid var(--dim)",flexShrink:0}}>
+      <div style={{width:230,background:"rgba(4,10,18,.96)",borderRight:"1px solid var(--dim)",flexShrink:0}}>
         <div style={{padding:"13px 13px 9px",borderBottom:"1px solid var(--dim)"}}>
           <div style={{fontFamily:"var(--disp)",fontSize:9,letterSpacing:3,color:"var(--ts)"}}>ROOMS</div>
         </div>
@@ -919,7 +927,9 @@ const RoomsView=({user,rooms,setRooms})=>{
             <div style={{flex:1,minWidth:0}}>
               <div style={{fontFamily:"var(--ui)",fontWeight:600,fontSize:12,color:activeId===r.id?"var(--tx)":"var(--ts)",
                 whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.name}</div>
-              <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--tm)"}}>{r.members.length+r.leaders.length} members</div>
+              <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--tm)"}}>
+                {r.parentId?"PERSONALIZED":"MAIN"} · {r.members.length+r.leaders.length} members
+              </div>
             </div>
           </div>
         ))}
@@ -932,17 +942,35 @@ const RoomsView=({user,rooms,setRooms})=>{
               <span style={{fontSize:19}}>{active.icon}</span>
               <div>
                 <div style={{fontFamily:"var(--disp)",fontSize:11,letterSpacing:2,color:"var(--tx)"}}>{active.name}</div>
-                <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--ts)"}}>{active.type.toUpperCase()} · {active.access.toUpperCase()}</div>
+                <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--ts)"}}>
+                  {active.type.toUpperCase()} · {active.access.toUpperCase()}{active.parentId?" · PERSONALIZED":""}
+                </div>
               </div>
             </div>
             <div style={{display:"flex",gap:6}}>
-              {["🔗 GITHUB","📞 VOICE","📹 VIDEO"].map((a,i)=>(
-                <button key={i} style={{background:"var(--surface)",border:"1px solid var(--dim)",
+              {(active.type==="tech"||active.type==="aiml")&&(
+                <button style={{background:"var(--surface)",border:"1px solid var(--dim)",
                   color:"var(--ts)",fontFamily:"var(--mono)",fontSize:9,padding:"5px 9px",cursor:"pointer",
                   borderRadius:2,transition:"all .15s",letterSpacing:1}}
                   onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--glow)";e.currentTarget.style.color="var(--cyan)"}}
-                  onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--dim)";e.currentTarget.style.color="var(--ts)"}}>{a}</button>
-              ))}
+                  onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--dim)";e.currentTarget.style.color="var(--ts)"}}
+                  onClick={()=>window.open("https://github.com","_blank")}>🔗 GITHUB</button>
+              )}
+              {active.type==="finance"&&(
+                <>
+                  <button style={{background:"var(--surface)",border:"1px solid var(--dim)",
+                    color:"var(--ts)",fontFamily:"var(--mono)",fontSize:9,padding:"5px 9px",cursor:"pointer",
+                    borderRadius:2,transition:"all .15s",letterSpacing:1}}>📊 CHARTS</button>
+                  <button style={{background:"var(--surface)",border:"1px solid var(--dim)",
+                    color:"var(--ts)",fontFamily:"var(--mono)",fontSize:9,padding:"5px 9px",cursor:"pointer",
+                    borderRadius:2,transition:"all .15s",letterSpacing:1}}>📑 REPORTS</button>
+                </>
+              )}
+              {active.type==="design"&&(
+                <button style={{background:"var(--surface)",border:"1px solid var(--dim)",
+                  color:"var(--ts)",fontFamily:"var(--mono)",fontSize:9,padding:"5px 9px",cursor:"pointer",
+                  borderRadius:2,transition:"all .15s",letterSpacing:1}}>🖼 MEDIA BOARD</button>
+              )}
             </div>
           </div>
           <div style={{flex:1,overflowY:"auto",padding:"17px 17px 0",display:"flex",flexDirection:"column",gap:13}}>
@@ -980,10 +1008,15 @@ const RoomsView=({user,rooms,setRooms})=>{
                   onMouseLeave={e=>e.currentTarget.style.borderColor="var(--dim)"}>{r}</button>
               ))}
             </div>
+            <div style={{display:"flex",gap:8,marginBottom:8}}>
+              <button className="btn" style={{padding:"6px 10px",fontSize:10}}>ATTACH FILE</button>
+              <button className="btn" style={{padding:"6px 10px",fontSize:10}}>VOICE</button>
+              <button className="btn" style={{padding:"6px 10px",fontSize:10}}>CAMERA</button>
+            </div>
             <div style={{display:"flex",gap:8}}>
-              <input className="inp" style={{flex:1}} placeholder="Encrypted message..."
-                value={msg} onChange={e=>setMsg(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()}/>
-              <button className="btn btn-solid" style={{flexShrink:0,padding:"10px 17px"}} onClick={send}>SEND ↑</button>
+              <input className="inp" style={{flex:1}} placeholder={canPost?"Encrypted message...":"Read-only · Main room is leader-only"}
+                value={msg} onChange={e=>setMsg(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()} disabled={!canPost}/>
+              <button className="btn btn-solid" style={{flexShrink:0,padding:"10px 17px"}} onClick={send} disabled={!canPost}>SEND ↑</button>
             </div>
           </div>
         </div>
@@ -1017,8 +1050,10 @@ const RoomsView=({user,rooms,setRooms})=>{
 /* ═══════════════════════════════════════════════════════════
    ADMIN VIEW
 ═══════════════════════════════════════════════════════════ */
-const AdminView=({rooms,setRooms,allUsers,onApprove,onReject,onAssignLeader,onRoleChange})=>{
+const AdminView=({user,rooms,setRooms,allUsers,onApprove,onReject,onAssignLeader,onRoleChange})=>{
+  const [subForms,setSubForms]=useState({});
   const leaders=allUsers.filter(u=>u.role==="leader");
+  const members=allUsers.filter(u=>u.role!=="admin");
   const approve=async(roomId,userId)=>{
     if(onApprove){await onApprove(roomId,userId);return;}
     const u=allUsers.find(u=>u.id===userId);if(!u)return;
@@ -1031,12 +1066,58 @@ const AdminView=({rooms,setRooms,allUsers,onApprove,onReject,onAssignLeader,onRo
   const assignLeader=async(roomId,userId)=>{
     if(onAssignLeader){await onAssignLeader(roomId,userId);return;}
     const u=allUsers.find(u=>u.id===userId);if(!u)return;
-    setRooms(rs=>rs.map(r=>r.id===roomId?{...r,leaders:r.leaders.find(l=>l.id===userId)?r.leaders:[...r.leaders,u]}:r));
+    setRooms(rs=>{
+      const parentId=rs.find(x=>x.id===roomId)?.parentId;
+      return rs.map(r=>{
+        if(r.id===roomId||r.id===parentId){
+          return {...r,leaders:r.leaders.find(l=>l.id===userId)?r.leaders:[...r.leaders,u]};
+        }
+        return r;
+      });
+    });
+  };
+  const assignMember=(roomId,userId)=>{
+    const u=allUsers.find(u=>u.id===userId);if(!u)return;
+    setRooms(rs=>{
+      const parentId=rs.find(x=>x.id===roomId)?.parentId;
+      return rs.map(r=>{
+        if(r.id===roomId||r.id===parentId){
+          return {...r,members:r.members.find(m=>m.id===userId)?r.members:[...r.members,u]};
+        }
+        return r;
+      });
+    });
+  };
+  const createSubroom=(mainRoomId,form)=>{
+    setRooms(rs=>{
+      const main=rs.find(r=>r.id===mainRoomId);
+      if(!main)return rs;
+      const room={
+        id:"room_"+Date.now()+"_"+Math.random().toString(36).slice(2,5),
+        parentId:mainRoomId,
+        createdBy:main.createdBy,
+        name:form.name,
+        type:form.type,
+        icon:{tech:"⚛",design:"◇",finance:"◈",research:"⬡",aiml:"🧠",devops:"⬟"}[form.type]||"⬡",
+        access:form.access||"private",
+        description:form.description||"",
+        code:Math.random().toString(36).slice(2,8).toUpperCase(),
+        active:true,
+        leaders:[],
+        members:[],
+        pending:[],
+        messages:[],
+        createdAt:new Date().toLocaleString(),
+      };
+      return [...rs,room];
+    });
   };
   const changeRole=async(userId,role)=>{
     if(onRoleChange){await onRoleChange(userId,role);return;}
   };
-  const allPending=rooms.flatMap(r=>r.pending.map(p=>({...p,roomId:r.id,roomName:r.name})));
+  const allPending=rooms
+    .filter(r=>r.createdBy===user.id)
+    .flatMap(r=>r.pending.map(p=>({...p,roomId:r.id,roomName:r.name})));
   return(
     <div style={{padding:24,overflowY:"auto",height:"calc(100vh - 52px)",animation:"fadeIn .3s"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:22}}>
@@ -1092,8 +1173,8 @@ const AdminView=({rooms,setRooms,allUsers,onApprove,onReject,onAssignLeader,onRo
                   </div>
                   {r.leaders.length===0?<div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--tm)",marginBottom:7}}>No leader assigned</div>:
                     r.leaders.map((l,i)=><div key={i} style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--purple)",marginBottom:3}}>◈ {l.name}</div>)}
-                  <select onChange={e=>e.target.value&&assignLeader(r.id,e.target.value)} defaultValue=""
-                    style={{width:"100%",background:"var(--elevated)",border:"1px solid var(--dim)",color:"var(--ts)",fontFamily:"var(--mono)",fontSize:9,padding:"5px 7px",marginTop:5,cursor:"pointer"}}>
+                  <select onChange={e=>e.target.value&&assignLeader(r.id,e.target.value)} defaultValue="" disabled={r.createdBy!==user.id}
+                    style={{width:"100%",background:"var(--elevated)",border:"1px solid var(--dim)",color:"var(--ts)",fontFamily:"var(--mono)",fontSize:9,padding:"5px 7px",marginTop:5,cursor:r.createdBy!==user.id?"not-allowed":"pointer",opacity:r.createdBy!==user.id?0.6:1}}>
                     <option value="">+ Assign leader...</option>
                     {leaders.filter(l=>!r.leaders.some(rl=>rl.id===l.id)).map(l=>(
                       <option key={l.id} value={l.id}>{l.name}</option>
@@ -1101,6 +1182,81 @@ const AdminView=({rooms,setRooms,allUsers,onApprove,onReject,onAssignLeader,onRo
                   </select>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+        <div className="panel" style={{padding:17,gridColumn:"1/-1"}}>
+          <div style={{fontFamily:"var(--disp)",fontSize:9,letterSpacing:3,color:"var(--ts)",marginBottom:13}}>PERSONALIZED ROOMS</div>
+          {rooms.filter(r=>!r.parentId).length===0?(
+            <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--tm)"}}>Create a main room first.</div>
+          ):(
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              {rooms.filter(r=>!r.parentId).map(mainRoom=>{
+                const owned=mainRoom.createdBy===user.id;
+                const subrooms=rooms.filter(r=>r.parentId===mainRoom.id);
+                const form=subForms[mainRoom.id]||{name:"",type:"tech",access:"private"};
+                return(
+                  <div key={mainRoom.id} style={{background:"var(--surface)",border:"1px solid var(--dim)",padding:"12px 14px",borderRadius:2}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                      <span style={{fontSize:16}}>{mainRoom.icon}</span>
+                      <div style={{fontFamily:"var(--ui)",fontWeight:700,fontSize:12}}>{mainRoom.name}</div>
+                      {!owned&&<span className="tag" style={{color:"var(--tm)",fontSize:8}}>OWNER ONLY</span>}
+                    </div>
+                    {owned&&(
+                      <div style={{display:"grid",gridTemplateColumns:"1.2fr 1fr 1fr auto",gap:8,marginBottom:10}}>
+                        <input className="inp" placeholder="Personalized room name"
+                          value={form.name} onChange={e=>setSubForms(s=>({...s,[mainRoom.id]:{...form,name:e.target.value}}))}/>
+                        <select className="inp" value={form.type} onChange={e=>setSubForms(s=>({...s,[mainRoom.id]:{...form,type:e.target.value}}))}>
+                          {["tech","design","finance","research","aiml","devops"].map(t=><option key={t} value={t}>{t.toUpperCase()}</option>)}
+                        </select>
+                        <select className="inp" value={form.access} onChange={e=>setSubForms(s=>({...s,[mainRoom.id]:{...form,access:e.target.value}}))}>
+                          {["private","public"].map(a=><option key={a} value={a}>{a.toUpperCase()}</option>)}
+                        </select>
+                        <button className="btn btn-solid" onClick={()=>{
+                          if(!form.name)return;
+                          createSubroom(mainRoom.id,form);
+                          setSubForms(s=>({...s,[mainRoom.id]:{name:"",type:"tech",access:"private"}}));
+                        }}>CREATE</button>
+                      </div>
+                    )}
+                    {subrooms.length===0?(
+                      <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--tm)"}}>No personalized rooms yet.</div>
+                    ):(
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9}}>
+                        {subrooms.map(sr=>(
+                          <div key={sr.id} style={{border:"1px solid var(--dim)",padding:"10px 12px",borderRadius:2}}>
+                            <div style={{fontFamily:"var(--ui)",fontWeight:700,fontSize:11,marginBottom:6}}>{sr.icon} {sr.name}</div>
+                            <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--tm)",marginBottom:6}}>
+                              {sr.type.toUpperCase()} · {sr.access.toUpperCase()}
+                            </div>
+                            <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--ts)",marginBottom:6}}>
+                              Leaders: {sr.leaders.map(l=>l.name.split(" ")[0]).join(",")||"None"}
+                            </div>
+                            {owned&&(
+                              <>
+                                <select onChange={e=>e.target.value&&assignLeader(sr.id,e.target.value)} defaultValue=""
+                                  style={{width:"100%",background:"var(--elevated)",border:"1px solid var(--dim)",color:"var(--ts)",fontFamily:"var(--mono)",fontSize:9,padding:"5px 7px",marginBottom:6,cursor:"pointer"}}>
+                                  <option value="">+ Assign leader...</option>
+                                  {leaders.filter(l=>!sr.leaders.some(rl=>rl.id===l.id)).map(l=>(
+                                    <option key={l.id} value={l.id}>{l.name}</option>
+                                  ))}
+                                </select>
+                                <select onChange={e=>e.target.value&&assignMember(sr.id,e.target.value)} defaultValue=""
+                                  style={{width:"100%",background:"var(--elevated)",border:"1px solid var(--dim)",color:"var(--ts)",fontFamily:"var(--mono)",fontSize:9,padding:"5px 7px",cursor:"pointer"}}>
+                                  <option value="">+ Assign member...</option>
+                                  {members.filter(m=>!sr.members.some(sm=>sm.id===m.id)).map(m=>(
+                                    <option key={m.id} value={m.id}>{m.name}</option>
+                                  ))}
+                                </select>
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -1357,6 +1513,7 @@ export default function App(){
             {view==="ai"      &&<AIView/>}
             {view==="admin"   &&user.role==="admin"&&(
               <AdminView
+                user={user}
                 rooms={rooms}
                 setRooms={setRooms}
                 allUsers={allUsers}
@@ -1371,6 +1528,8 @@ export default function App(){
           const iconMap={tech:"⚛",design:"◇",finance:"◈",research:"⬡",aiml:"🧠",devops:"⬟"};
           const room={
             id:"room_"+Date.now(),
+            parentId:null,
+            createdBy:user.id,
             name:payload.name,
             type:payload.type,
             icon:iconMap[payload.type]||"⬡",
@@ -1378,7 +1537,7 @@ export default function App(){
             description:payload.description||"",
             code:Math.random().toString(36).slice(2,8).toUpperCase(),
             active:true,
-            leaders:[],
+            leaders:[user],
             members:[],
             pending:[],
             messages:[],
@@ -1395,6 +1554,7 @@ export default function App(){
             setRooms(rs=>rs.map(r=>{
               if(r.code===code.toUpperCase()){
                 found=true;
+                if(r.parentId)return r;
                 if(!r.pending.find(p=>p.id===user.id)&&!r.members.find(m=>m.id===user.id)&&!r.leaders.find(l=>l.id===user.id)){
                   return {...r,pending:[...r.pending,user]};
                 }
@@ -1402,6 +1562,8 @@ export default function App(){
               return r;
             }));
             if(!found)throw new Error("No room found with that code.");
+            const target=rooms.find(r=>r.code===code.toUpperCase());
+            if(target?.parentId)throw new Error("Only main rooms accept join requests.");
           }}/>
       )}
     </>
