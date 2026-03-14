@@ -548,21 +548,18 @@ const HomeScreen=({user,rooms,setView,setModal})=>{
 
           {/* CREATE ROOM */}
           <button
-            onClick={()=> user.role==="admin" ? setModal("create") : setModal("join")}
-            disabled={user.role==="leader"}
+            onClick={()=> setModal("create")}
             style={{
               background:"transparent",
               border:"1px solid rgba(0,255,231,.35)",
-              cursor: user.role==="leader" ? "default" : "pointer",
+              cursor: "pointer",
               padding:"36px 28px",
               position:"relative",
               overflow:"hidden",
               transition:"all .25s",
               clipPath:"polygon(14px 0,100% 0,calc(100% - 14px) 100%,0 100%)",
-              opacity: user.role==="leader" ? .4 : 1,
             }}
             onMouseEnter={e=>{
-              if(user.role==="leader")return;
               e.currentTarget.style.background="rgba(0,255,231,.07)";
               e.currentTarget.style.borderColor="rgba(0,255,231,.7)";
               e.currentTarget.style.boxShadow="0 0 40px rgba(0,255,231,.18),inset 0 0 40px rgba(0,255,231,.04)";
@@ -583,9 +580,7 @@ const HomeScreen=({user,rooms,setView,setModal})=>{
                 CREATE ROOM
               </div>
               <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--ts)",lineHeight:1.7}}>
-                {user.role==="admin"
-                  ? "Start a new secure workspace.\nSet access rules & assign leaders."
-                  : "Only admins can create rooms."}
+                {"Start a new secure workspace.\nSet access rules & assign leaders."}
               </div>
             </div>
           </button>
@@ -1371,7 +1366,7 @@ export default function App(){
         </div>
       )}
 
-      {modal==="create"&&user?.role==="admin"&&(
+      {modal==="create"&&user&&(
         <CreateRoomModal onClose={()=>setModal(null)} onCreate={async(payload)=>{
           const iconMap={tech:"⚛",design:"◇",finance:"◈",research:"⬡",aiml:"🧠",devops:"⬟"};
           const room={
