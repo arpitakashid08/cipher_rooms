@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 
 /* ═══════════════════════════════════════════════════════════
    GLOBAL STYLES
@@ -320,78 +320,35 @@ const Intro = ({ onDone }) => {
   );
 };
 
-const API_BASE = import.meta.env.VITE_API_URL || "";
-const api = async (path, options = {}) => {
-  const res = await fetch(`${API_BASE}${path}`, {
-    credentials: "include",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
-  if (!res.ok) {
-    let msg = "Request failed";
-    try {
-      const data = await res.json();
-      if (data?.error) msg = data.error;
-    } catch {
-      // ignore parse errors
-    }
-    throw new Error(msg);
-  }
-  return res.json();
-};
+/* ═══════════════════════════════════════════════════════════
+   DEMO USERS
+═══════════════════════════════════════════════════════════ */
+const USERS = [
+  {id:"u0",email:"admin_cipher@cipher.com",  password:"cipher@2024",name:"Alex Morgan",    role:"admin", avatar:"👑"},
+  {id:"u1",email:"sarah_frontend@cipher.com",password:"front123",   name:"Sarah Kim",      role:"leader",avatar:"⚛"},
+  {id:"u2",email:"marcus_back@cipher.com",   password:"back456",    name:"Marcus Thompson",role:"leader",avatar:"⬡"},
+  {id:"u3",email:"priya_ai@cipher.com",      password:"aiml789",    name:"Priya Rajan",    role:"leader",avatar:"◈"},
+  {id:"u4",email:"dev_alex@cipher.com",      password:"dev001",     name:"Alex Chen",      role:"member",avatar:"⚡"},
+  {id:"u5",email:"dev_jamie@cipher.com",     password:"dev002",     name:"Jamie Liu",      role:"member",avatar:"🌟"},
+  {id:"u6",email:"design_leo@cipher.com",    password:"des789",     name:"Leo Martin",     role:"member",avatar:"◇"},
+];
 
 /* ═══════════════════════════════════════════════════════════
    LOGIN
 ═══════════════════════════════════════════════════════════ */
 const Login = ({ onLogin }) => {
-  const [mode,setMode]=useState("login"); // login | register | forgot | reset
-  const [creds,setCreds]=useState({name:"",email:"",password:"",token:"",newPassword:""});
+  const [creds,setCreds]=useState({email:"",password:""});
   const [err,setErr]=useState("");
   const [loading,setLoading]=useState(false);
-  const [info,setInfo]=useState("");
+  const [showCreds,setShowCreds]=useState(false);
 
-  useEffect(()=>{
-    const params = new URLSearchParams(window.location.search);
-    if(params.get("reset")==="1"){
-      setMode("reset");
-      setCreds(c=>({
-        ...c,
-        email: params.get("email") || "",
-        token: params.get("token") || "",
-      }));
-    }
-  },[]);
-
-  const go=async()=>{
+  const go=()=>{
     setLoading(true);setErr("");
-    try{
-      if(mode==="forgot"){
-        const data=await api("/auth/forgot",{method:"POST",body:JSON.stringify({email:creds.email})});
-        setInfo(data.resetToken ? `Reset token: ${data.resetToken}` : "If the email exists, reset instructions were sent.");
-        setMode("reset");
-        setLoading(false);
-        return;
-      }
-      if(mode==="reset"){
-        await api("/auth/reset",{method:"POST",body:JSON.stringify({email:creds.email,token:creds.token,newPassword:creds.newPassword})});
-        setInfo("Password reset successful. You can sign in now.");
-        setMode("login");
-        setLoading(false);
-        return;
-      }
-      const path=mode==="login"?"/auth/login":"/auth/register";
-      const payload=mode==="login"
-        ? {email:creds.email,password:creds.password}
-        : {name:creds.name,email:creds.email,password:creds.password};
-      const data=await api(path,{method:"POST",body:JSON.stringify(payload)});
-      onLogin(data.user);
-    }catch(e){
-      setErr(`ACCESS DENIED — ${e.message}`);
-      setLoading(false);
-    }
+    setTimeout(()=>{
+      const u=USERS.find(u=>u.email===creds.email&&u.password===creds.password);
+      if(u)onLogin(u);
+      else{setErr("ACCESS DENIED — Invalid credentials");setLoading(false);}
+    },500);
   };
 
   return(
@@ -407,89 +364,50 @@ const Login = ({ onLogin }) => {
           <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:3}}>AUTHENTICATE TO CONTINUE</div>
         </div>
         <div className="panel" style={{padding:30,border:"1px solid rgba(0,255,231,.22)",boxShadow:"0 0 55px rgba(0,255,231,.06)"}}>
-          <div style={{fontFamily:"var(--disp)",fontSize:10,letterSpacing:3,color:"var(--ts)",marginBottom:22}}>
-            {mode==="login"?"SECURE LOGIN":mode==="register"?"CREATE ACCOUNT":mode==="forgot"?"RESET REQUEST":"RESET PASSWORD"}
-          </div>
+          <div style={{fontFamily:"var(--disp)",fontSize:10,letterSpacing:3,color:"var(--ts)",marginBottom:22}}>SECURE LOGIN</div>
           <div style={{display:"flex",flexDirection:"column",gap:15}}>
-            {mode==="register"&&(
-              <div>
-                <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>DISPLAY NAME</label>
-                <input className="inp" placeholder="your name" value={creds.name}
-                  onChange={e=>setCreds({...creds,name:e.target.value})}
-                  onKeyDown={e=>e.key==="Enter"&&go()}/>
-              </div>
-            )}
-            {(mode==="login"||mode==="register"||mode==="forgot"||mode==="reset")&&(
-              <div>
-                <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>EMAIL</label>
-                <input className="inp" placeholder="email@domain.com" value={creds.email}
-                  onChange={e=>setCreds({...creds,email:e.target.value})}
-                  onKeyDown={e=>e.key==="Enter"&&go()}/>
-              </div>
-            )}
-            {(mode==="login"||mode==="register")&&(
-              <div>
-                <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>AUTH KEY</label>
-                <input className="inp" type="password" placeholder="password" value={creds.password}
-                  onChange={e=>setCreds({...creds,password:e.target.value})}
-                  onKeyDown={e=>e.key==="Enter"&&go()}/>
-              </div>
-            )}
-            {mode==="reset"&&(
-              <>
-                <div>
-                  <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>RESET TOKEN</label>
-                  <input className="inp" placeholder="paste token" value={creds.token}
-                    onChange={e=>setCreds({...creds,token:e.target.value})}
-                    onKeyDown={e=>e.key==="Enter"&&go()}/>
-                </div>
-                <div>
-                  <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>NEW PASSWORD</label>
-                  <input className="inp" type="password" placeholder="new password" value={creds.newPassword}
-                    onChange={e=>setCreds({...creds,newPassword:e.target.value})}
-                    onKeyDown={e=>e.key==="Enter"&&go()}/>
-                </div>
-              </>
-            )}
-            {info&&<div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--green)",padding:"8px 12px",
-              border:"1px solid rgba(0,255,136,.25)",background:"rgba(0,255,136,.05)",animation:"slideUp .2s"}}>{info}</div>}
+            <div>
+              <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>EMAIL</label>
+              <input className="inp" placeholder="email@domain.com" value={creds.email}
+                onChange={e=>setCreds({...creds,email:e.target.value})}
+                onKeyDown={e=>e.key==="Enter"&&go()}/>
+            </div>
+            <div>
+              <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>AUTH KEY</label>
+              <input className="inp" type="password" placeholder="password" value={creds.password}
+                onChange={e=>setCreds({...creds,password:e.target.value})}
+                onKeyDown={e=>e.key==="Enter"&&go()}/>
+            </div>
             {err&&<div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--red)",padding:"8px 12px",
               border:"1px solid rgba(255,45,85,.25)",background:"rgba(255,45,85,.05)",animation:"slideUp .2s"}}>{err}</div>}
             <button className="btn btn-solid" style={{width:"100%",padding:13,marginTop:4}}
-              onClick={go} disabled={loading||!creds.email||((mode==="login"||mode==="register")&&!creds.password)||(mode==="register"&&!creds.name)||(mode==="reset"&&(!creds.token||!creds.newPassword))}>
-              {loading?<span style={{animation:"pulse 1s infinite"}}>VERIFYING...</span>:
-                mode==="login"?"AUTHENTICATE →":
-                mode==="register"?"CREATE ACCOUNT →":
-                mode==="forgot"?"SEND RESET →":"RESET PASSWORD →"}
+              onClick={go} disabled={loading||!creds.email||!creds.password}>
+              {loading?<span style={{animation:"pulse 1s infinite"}}>VERIFYING...</span>:"AUTHENTICATE →"}
             </button>
-            {mode==="register"&&(
-              <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--tm)",lineHeight:1.6}}>
-                First registered account becomes admin. Admins can assign roles later.
+          </div>
+          <div style={{marginTop:18,borderTop:"1px solid var(--dim)",paddingTop:15}}>
+            <button onClick={()=>setShowCreds(s=>!s)}
+              style={{background:"none",border:"none",color:"var(--ts)",fontFamily:"var(--mono)",fontSize:9,
+                cursor:"pointer",letterSpacing:1,display:"flex",alignItems:"center",gap:6}}>
+              {showCreds?"▾":"▸"} VIEW TEST CREDENTIALS
+            </button>
+            {showCreds&&(
+              <div style={{marginTop:11,display:"flex",flexDirection:"column",gap:3,animation:"slideUp .2s"}}>
+                {USERS.map(u=>(
+                  <div key={u.id} onClick={()=>setCreds({email:u.email,password:u.password})}
+                    style={{display:"flex",gap:10,padding:"6px 10px",cursor:"pointer",borderRadius:2,
+                      transition:"background .15s",fontFamily:"var(--mono)",fontSize:10}}
+                    onMouseEnter={e=>e.currentTarget.style.background="rgba(0,255,231,.05)"}
+                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                    <span style={{width:20}}>{u.avatar}</span>
+                    <span style={{color:"var(--cyan)",flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{u.email}</span>
+                    <span style={{color:"var(--tm)"}}>{u.password}</span>
+                    <span className="tag" style={{color:u.role==="admin"?"var(--amber)":u.role==="leader"?"var(--purple)":"var(--green)",fontSize:8}}>{u.role.toUpperCase()}</span>
+                  </div>
+                ))}
               </div>
             )}
           </div>
-          <div style={{marginTop:18,borderTop:"1px solid var(--dim)",paddingTop:15,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)"}}>
-              {mode==="login"?"No account yet?":"Already have an account?"}
-            </div>
-            <button onClick={()=>{
-              setMode(m=>m==="login"?"register":"login");
-              setErr("");
-              setInfo("");
-            }}
-              style={{background:"none",border:"1px solid var(--dim)",color:"var(--cyan)",fontFamily:"var(--mono)",fontSize:9,
-                cursor:"pointer",letterSpacing:1,padding:"6px 10px",borderRadius:2}}>
-              {mode==="login"?"CREATE ONE":"SIGN IN"}
-            </button>
-          </div>
-          {mode==="login"&&(
-            <div style={{marginTop:10,textAlign:"center"}}>
-              <button onClick={()=>{setMode("forgot");setErr("");setInfo("");}}
-                style={{background:"none",border:"none",color:"var(--ts)",fontFamily:"var(--mono)",fontSize:9,cursor:"pointer",letterSpacing:1}}>
-                FORGOT PASSWORD?
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -1420,48 +1338,7 @@ export default function App(){
   const [view,setView]=useState("home");
   const [modal,setModal]=useState(null);
   const [rooms,setRooms]=useState([]);
-  const [allUsers,setAllUsers]=useState([]);
-
-  const refreshRooms=useCallback(async()=>{
-    if(!user)return;
-    try{
-      const data=await api("/rooms");
-      setRooms(data.rooms||[]);
-    }catch{
-      // ignore refresh errors on boot
-    }
-  },[user]);
-
-  useEffect(()=>{
-    if(phase!=="login")return;
-    (async()=>{
-      try{
-        const data=await api("/auth/me");
-        setUser(data.user);
-        setPhase("app");
-      }catch{
-        // ignore
-      }
-    })();
-  },[phase]);
-
-  useEffect(()=>{
-    refreshRooms();
-  },[refreshRooms]);
-
-  const refreshUsers=useCallback(async()=>{
-    if(!user||user.role!=="admin")return;
-    try{
-      const data=await api("/users");
-      setAllUsers(data.users||[]);
-    }catch{
-      // ignore refresh errors
-    }
-  },[user]);
-
-  useEffect(()=>{
-    refreshUsers();
-  },[refreshUsers]);
+  const [allUsers]=useState(USERS);
 
   return(
     <>
@@ -1475,9 +1352,8 @@ export default function App(){
       {phase==="app"&&user&&(
         <div style={{width:"100vw",height:"100vh",display:"flex",flexDirection:"column",overflow:"hidden",position:"relative"}}>
           <CircuitBg/><HexGrid/><ScanLine/>
-          <TopBar view={view} setView={setView} user={user} onLogout={async()=>{
-            try{await api("/auth/logout",{method:"POST"});}catch{}
-            setUser(null);setRooms([]);setAllUsers([]);setView("home");setPhase("login");
+          <TopBar view={view} setView={setView} user={user} onLogout={()=>{
+            setUser(null);setRooms([]);setView("home");setPhase("login");
           }}/>
           <div style={{flex:1,overflow:"hidden",position:"relative",zIndex:5}}>
             {view==="home"    &&<HomeScreen user={user} rooms={rooms} setView={setView} setModal={setModal}/>}
@@ -1489,22 +1365,6 @@ export default function App(){
                 rooms={rooms}
                 setRooms={setRooms}
                 allUsers={allUsers}
-                onApprove={async(roomId,userId)=>{
-                  await api(`/rooms/${roomId}/approve`,{method:"POST",body:JSON.stringify({userId})});
-                  await refreshRooms();
-                }}
-                onReject={async(roomId,userId)=>{
-                  await api(`/rooms/${roomId}/reject`,{method:"POST",body:JSON.stringify({userId})});
-                  await refreshRooms();
-                }}
-                onAssignLeader={async(roomId,userId)=>{
-                  await api(`/rooms/${roomId}/assign-leader`,{method:"POST",body:JSON.stringify({userId})});
-                  await refreshRooms();
-                }}
-                onRoleChange={async(userId,role)=>{
-                  await api(`/users/${userId}/role`,{method:"POST",body:JSON.stringify({role})});
-                  await refreshUsers();
-                }}
               />
             )}
           </div>
@@ -1513,16 +1373,40 @@ export default function App(){
 
       {modal==="create"&&user?.role==="admin"&&(
         <CreateRoomModal onClose={()=>setModal(null)} onCreate={async(payload)=>{
-          const data=await api("/rooms",{method:"POST",body:JSON.stringify(payload)});
-          await refreshRooms();
-          return data.room;
+          const iconMap={tech:"⚛",design:"◇",finance:"◈",research:"⬡",aiml:"🧠",devops:"⬟"};
+          const room={
+            id:"room_"+Date.now(),
+            name:payload.name,
+            type:payload.type,
+            icon:iconMap[payload.type]||"⬡",
+            access:payload.access,
+            description:payload.description||"",
+            code:Math.random().toString(36).slice(2,8).toUpperCase(),
+            active:true,
+            leaders:[],
+            members:[],
+            pending:[],
+            messages:[],
+            createdAt:new Date().toLocaleString(),
+          };
+          setRooms(rs=>[...rs,room]);
+          return room;
         }}/>
       )}
       {modal==="join"&&(
         <JoinRoomModal onClose={()=>setModal(null)}
           onRequest={async(code)=>{
-            await api("/rooms/join",{method:"POST",body:JSON.stringify({code})});
-            await refreshRooms();
+            let found=false;
+            setRooms(rs=>rs.map(r=>{
+              if(r.code===code.toUpperCase()){
+                found=true;
+                if(!r.pending.find(p=>p.id===user.id)&&!r.members.find(m=>m.id===user.id)&&!r.leaders.find(l=>l.id===user.id)){
+                  return {...r,pending:[...r.pending,user]};
+                }
+              }
+              return r;
+            }));
+            if(!found)throw new Error("No room found with that code.");
           }}/>
       )}
     </>
