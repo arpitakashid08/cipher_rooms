@@ -720,12 +720,14 @@ const HomeScreen=({user,rooms,setView,setModal})=>{
 /* ═══════════════════════════════════════════════════════════
    CREATE ROOM MODAL
 ═══════════════════════════════════════════════════════════ */
-const CreateRoomModal=({onClose,onCreate})=>{
+const CreateRoomModal=({onClose,onCreate,allUsers})=>{
   const [step,setStep]=useState(1);
   const [form,setForm]=useState({name:"",type:"tech",access:"private",description:""});
   const [created,setCreated]=useState(null);
   const [err,setErr]=useState("");
   const [loading,setLoading]=useState(false);
+  const [selectedLeaders,setSelectedLeaders]=useState([]);
+  const [selectedMembers,setSelectedMembers]=useState([]);
   const types=[
     {id:"tech",l:"Tech / Hackathon",icon:"⚛"},{id:"design",l:"Design",icon:"◇"},
     {id:"finance",l:"Finance",icon:"◈"},{id:"research",l:"Research",icon:"⬡"},
@@ -736,6 +738,8 @@ const CreateRoomModal=({onClose,onCreate})=>{
     try{
       const room=await onCreate({
         name:form.name,type:form.type,access:form.access,description:form.description,
+        leaders:selectedLeaders,
+        members:selectedMembers,
       });
       setCreated(room);
       setStep(3);
@@ -800,6 +804,40 @@ const CreateRoomModal=({onClose,onCreate})=>{
             <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>DESCRIPTION</label>
             <textarea className="inp" rows={3} placeholder="What is this room for?" value={form.description}
               onChange={e=>setForm({...form,description:e.target.value})} style={{resize:"none"}}/>
+          </div>
+          <div>
+            <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>ASSIGN LEADERS (OPTIONAL)</label>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+              {allUsers.filter(u=>u.role==="leader").map(u=>(
+                <button key={u.id} onClick={()=>{
+                  setSelectedLeaders(ls=>ls.find(l=>l.id===u.id)?ls.filter(l=>l.id!==u.id):[...ls,u]);
+                }} style={{
+                  background:selectedLeaders.find(l=>l.id===u.id)?"rgba(176,96,255,.12)":"var(--surface)",
+                  border:`1px solid ${selectedLeaders.find(l=>l.id===u.id)?"rgba(176,96,255,.6)":"var(--dim)"}`,
+                  color:selectedLeaders.find(l=>l.id===u.id)?"var(--purple)":"var(--ts)",
+                  fontFamily:"var(--mono)",fontSize:9,padding:"6px 8px",cursor:"pointer",borderRadius:2
+                }}>
+                  {u.avatar} {u.name}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>ASSIGN MEMBERS (OPTIONAL)</label>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+              {allUsers.filter(u=>u.role!=="admin").map(u=>(
+                <button key={u.id} onClick={()=>{
+                  setSelectedMembers(ms=>ms.find(m=>m.id===u.id)?ms.filter(m=>m.id!==u.id):[...ms,u]);
+                }} style={{
+                  background:selectedMembers.find(m=>m.id===u.id)?"rgba(0,255,136,.12)":"var(--surface)",
+                  border:`1px solid ${selectedMembers.find(m=>m.id===u.id)?"rgba(0,255,136,.6)":"var(--dim)"}`,
+                  color:selectedMembers.find(m=>m.id===u.id)?"var(--green)":"var(--ts)",
+                  fontFamily:"var(--mono)",fontSize:9,padding:"6px 8px",cursor:"pointer",borderRadius:2
+                }}>
+                  {u.avatar} {u.name}
+                </button>
+              ))}
+            </div>
           </div>
           {err&&<div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--red)",
             padding:"8px 12px",border:"1px solid rgba(255,45,85,.25)"}}>⚠ {err}</div>}
@@ -886,6 +924,7 @@ const RoomsView=({user,rooms,setRooms})=>{
   const [activeId,setActiveId]=useState(my[0]?.id||null);
   const [msg,setMsg]=useState("");
   const endRef=useRef(null);
+  const fileInputRef=useRef(null);
   useEffect(()=>{
     if(!activeId||!my.find(r=>r.id===activeId))setActiveId(my[0]?.id||null);
   },[my,activeId]);
@@ -902,6 +941,38 @@ const RoomsView=({user,rooms,setRooms})=>{
       time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),reactions:{}};
     setRooms(rs=>rs.map(r=>r.id===active.id?{...r,messages:[...r.messages,m]}:r));
     setMsg("");
+  };
+  const addSystemMessage=(text)=>{
+    if(!active)return;
+    const m={id:Date.now(),user:"CipherMind AI",role:"ai",avatar:"🤖",text,
+      time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),reactions:{}};
+    setRooms(rs=>rs.map(r=>r.id===active.id?{...r,messages:[...r.messages,m]}:r));
+  };
+  const summarize=()=>{
+    if(!active)return;
+    const last=active.messages.slice(-6).map(m=>m.text).join(" ");
+    addSystemMessage(last?`Summary: ${last.slice(0,120)}${last.length>120?"…":""}`:"Summary: No messages yet.");
+  };
+  const ideas=()=>{
+    addSystemMessage("Ideas: Break tasks into milestones, assign owners, and set a short daily standup cadence.");
+  };
+  const onAttach=()=>{
+    if(!active||!canPost)return;
+    fileInputRef.current?.click();
+  };
+  const onFileChange=(e)=>{
+    const f=e.target.files?.[0];
+    if(!f||!active)return;
+    const m={id:Date.now(),user:user.name,role:user.role,avatar:user.avatar,text:`📎 Attached file: ${f.name}`,
+      time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),reactions:{}};
+    setRooms(rs=>rs.map(r=>r.id===active.id?{...r,messages:[...r.messages,m]}:r));
+    e.target.value="";
+  };
+  const quickReact=(emoji)=>{
+    if(!active||!canPost)return;
+    const m={id:Date.now(),user:user.name,role:user.role,avatar:user.avatar,text:`${emoji}`,
+      time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),reactions:{}};
+    setRooms(rs=>rs.map(r=>r.id===active.id?{...r,messages:[...r.messages,m]}:r));
   };
   if(my.length===0)return(
     <div style={{height:"calc(100vh - 52px)",display:"flex",alignItems:"center",justifyContent:"center",animation:"fadeIn .3s"}}>
@@ -989,8 +1060,8 @@ const RoomsView=({user,rooms,setRooms})=>{
                 <div style={{flex:1}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
                     <span style={{fontFamily:"var(--ui)",fontWeight:600,fontSize:12,
-                      color:m.role==="admin"?"var(--amber)":m.role==="leader"?"var(--purple)":"var(--tx)"}}>{m.user}</span>
-                    <span className="tag" style={{color:m.role==="admin"?"var(--amber)":m.role==="leader"?"var(--purple)":"var(--green)",fontSize:8}}>{m.role.toUpperCase()}</span>
+                      color:m.role==="admin"?"var(--amber)":m.role==="leader"?"var(--purple)":m.role==="ai"?"var(--cyan)":"var(--tx)"}}>{m.user}</span>
+                    <span className="tag" style={{color:m.role==="admin"?"var(--amber)":m.role==="leader"?"var(--purple)":m.role==="ai"?"var(--cyan)":"var(--green)",fontSize:8}}>{m.role.toUpperCase()}</span>
                     <span style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--tm)"}}>{m.time}</span>
                   </div>
                   <div style={{fontFamily:"var(--ui)",fontSize:13,color:"var(--ts)",lineHeight:1.65}}>{m.text}</div>
@@ -1004,20 +1075,24 @@ const RoomsView=({user,rooms,setRooms})=>{
               {["👍","👎","💡","⚡"].map(r=>(
                 <button key={r} style={{background:"var(--surface)",border:"1px solid var(--dim)",padding:"3px 9px",
                   cursor:"pointer",borderRadius:20,fontSize:13,transition:"border-color .15s"}}
+                  onClick={()=>quickReact(r)}
                   onMouseEnter={e=>e.currentTarget.style.borderColor="var(--glow)"}
                   onMouseLeave={e=>e.currentTarget.style.borderColor="var(--dim)"}>{r}</button>
               ))}
             </div>
             <div style={{display:"flex",gap:8,marginBottom:8}}>
-              <button className="btn" style={{padding:"6px 10px",fontSize:10}}>ATTACH FILE</button>
-              <button className="btn" style={{padding:"6px 10px",fontSize:10}}>VOICE</button>
-              <button className="btn" style={{padding:"6px 10px",fontSize:10}}>CAMERA</button>
+              <button className="btn" style={{padding:"6px 10px",fontSize:10}} onClick={onAttach}>ATTACH FILE</button>
+              <button className="btn" style={{padding:"6px 10px",fontSize:10}} onClick={()=>addSystemMessage("Voice chat started (demo).")}>VOICE</button>
+              <button className="btn" style={{padding:"6px 10px",fontSize:10}} onClick={()=>addSystemMessage("Camera session started (demo).")}>CAMERA</button>
+              <button className="btn" style={{padding:"6px 10px",fontSize:10}} onClick={summarize}>AI SUMMARY</button>
+              <button className="btn" style={{padding:"6px 10px",fontSize:10}} onClick={ideas}>IDEA GEN</button>
             </div>
             <div style={{display:"flex",gap:8}}>
               <input className="inp" style={{flex:1}} placeholder={canPost?"Encrypted message...":"Read-only · Main room is leader-only"}
                 value={msg} onChange={e=>setMsg(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()} disabled={!canPost}/>
               <button className="btn btn-solid" style={{flexShrink:0,padding:"10px 17px"}} onClick={send} disabled={!canPost}>SEND ↑</button>
             </div>
+            <input ref={fileInputRef} type="file" style={{display:"none"}} onChange={onFileChange}/>
           </div>
         </div>
         <div style={{width:185,background:"rgba(4,10,18,.96)",borderLeft:"1px solid var(--dim)",flexShrink:0}}>
@@ -1524,7 +1599,7 @@ export default function App(){
       )}
 
       {modal==="create"&&user&&(
-        <CreateRoomModal onClose={()=>setModal(null)} onCreate={async(payload)=>{
+        <CreateRoomModal onClose={()=>setModal(null)} allUsers={allUsers} onCreate={async(payload)=>{
           const iconMap={tech:"⚛",design:"◇",finance:"◈",research:"⬡",aiml:"🧠",devops:"⬟"};
           const room={
             id:"room_"+Date.now(),
@@ -1537,8 +1612,8 @@ export default function App(){
             description:payload.description||"",
             code:Math.random().toString(36).slice(2,8).toUpperCase(),
             active:true,
-            leaders:[user],
-            members:[],
+            leaders:[user,...(payload.leaders||[])],
+            members:[...(payload.members||[])],
             pending:[],
             messages:[],
             createdAt:new Date().toLocaleString(),
