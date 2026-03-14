@@ -353,6 +353,18 @@ const Login = ({ onLogin }) => {
   const [loading,setLoading]=useState(false);
   const [info,setInfo]=useState("");
 
+  useEffect(()=>{
+    const params = new URLSearchParams(window.location.search);
+    if(params.get("reset")==="1"){
+      setMode("reset");
+      setCreds(c=>({
+        ...c,
+        email: params.get("email") || "",
+        token: params.get("token") || "",
+      }));
+    }
+  },[]);
+
   const go=async()=>{
     setLoading(true);setErr("");
     try{
