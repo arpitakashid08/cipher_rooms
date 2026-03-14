@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --color-cyber-bg: #050511;
+  --color-cyber-blue: #00f0ff;
+  --color-cyber-purple: #8b00ff;
+  --color-cyber-dark: #0a0a1a;
+  --color-cyber-grid: rgba(0, 240, 255, 0.1);
+}
+
+:root {
+  --background: #050511;
+  --foreground: #e0e0e0;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: Arial, Helvetica, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Cyber grid background */
+.cyber-grid {
+  background-size: 40px 40px;
+  background-image: 
+    linear-gradient(to right, var(--color-cyber-grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-cyber-grid) 1px, transparent 1px);
+}
+
+/* Neon Glows */
+.glow-blue {
+  box-shadow: 0 0 10px #00f0ff, 0 0 20px #00f0ff;
+}
+
+.glow-purple {
+  box-shadow: 0 0 10px #8b00ff, 0 0 20px #8b00ff;
+}
+
+.text-glow-blue {
+  text-shadow: 0 0 5px #00f0ff, 0 0 10px #00f0ff;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #050511; 
+}
+::-webkit-scrollbar-thumb {
+  background: #00f0ff; 
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #00c0cc; 
+}
