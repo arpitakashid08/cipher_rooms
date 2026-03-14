@@ -720,7 +720,7 @@ const HomeScreen=({user,rooms,setView,setModal})=>{
 /* ═══════════════════════════════════════════════════════════
    CREATE ROOM MODAL
 ═══════════════════════════════════════════════════════════ */
-const CreateRoomModal=({onClose,onCreate,allUsers})=>{
+const CreateRoomModal=({onClose,onCreate,allUsers,onAddMember})=>{
   const [step,setStep]=useState(1);
   const [form,setForm]=useState({name:"",type:"tech",access:"private",description:""});
   const [created,setCreated]=useState(null);
@@ -728,6 +728,7 @@ const CreateRoomModal=({onClose,onCreate,allUsers})=>{
   const [loading,setLoading]=useState(false);
   const [selectedLeaders,setSelectedLeaders]=useState([]);
   const [selectedMembers,setSelectedMembers]=useState([]);
+  const [newMember,setNewMember]=useState("");
   const types=[
     {id:"tech",l:"Tech / Hackathon",icon:"⚛"},{id:"design",l:"Design",icon:"◇"},
     {id:"finance",l:"Finance",icon:"◈"},{id:"research",l:"Research",icon:"⬡"},
@@ -838,6 +839,16 @@ const CreateRoomModal=({onClose,onCreate,allUsers})=>{
                 </button>
               ))}
             </div>
+            <div style={{display:"flex",gap:6,marginTop:8}}>
+              <input className="inp" placeholder="Add new member name"
+                value={newMember} onChange={e=>setNewMember(e.target.value)}/>
+              <button className="btn" onClick={()=>{
+                if(!newMember.trim()||!onAddMember)return;
+                const u=onAddMember(newMember.trim());
+                setSelectedMembers(ms=>[...ms,u]);
+                setNewMember("");
+              }}>ADD</button>
+            </div>
           </div>
           {err&&<div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--red)",
             padding:"8px 12px",border:"1px solid rgba(255,45,85,.25)"}}>⚠ {err}</div>}
@@ -937,15 +948,17 @@ const RoomsView=({user,rooms,setRooms})=>{
   const canPost=active && (isMainRoom ? (isMainUser||isLeader) : (isMainUser||isLeader||isMember));
   const send=()=>{
     if(!msg.trim()||!active||!canPost)return;
-    const m={id:Date.now(),user:user.name,role:user.role,avatar:user.avatar,text:msg.trim(),
-      time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),reactions:{}};
+    const now=Date.now();
+    const m={id:now,user:user.name,role:user.role,avatar:user.avatar,text:msg.trim(),
+      time:new Date(now).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),ts:now,reactions:{}};
     setRooms(rs=>rs.map(r=>r.id===active.id?{...r,messages:[...r.messages,m]}:r));
     setMsg("");
   };
   const addSystemMessage=(text)=>{
     if(!active)return;
-    const m={id:Date.now(),user:"CipherMind AI",role:"ai",avatar:"🤖",text,
-      time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),reactions:{}};
+    const now=Date.now();
+    const m={id:now,user:"CipherMind AI",role:"ai",avatar:"🤖",text,
+      time:new Date(now).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),ts:now,reactions:{}};
     setRooms(rs=>rs.map(r=>r.id===active.id?{...r,messages:[...r.messages,m]}:r));
   };
   const summarize=()=>{
@@ -963,15 +976,17 @@ const RoomsView=({user,rooms,setRooms})=>{
   const onFileChange=(e)=>{
     const f=e.target.files?.[0];
     if(!f||!active)return;
-    const m={id:Date.now(),user:user.name,role:user.role,avatar:user.avatar,text:`📎 Attached file: ${f.name}`,
-      time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),reactions:{}};
+    const now=Date.now();
+    const m={id:now,user:user.name,role:user.role,avatar:user.avatar,text:`📎 Attached file: ${f.name}`,
+      time:new Date(now).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),ts:now,reactions:{}};
     setRooms(rs=>rs.map(r=>r.id===active.id?{...r,messages:[...r.messages,m]}:r));
     e.target.value="";
   };
   const quickReact=(emoji)=>{
     if(!active||!canPost)return;
-    const m={id:Date.now(),user:user.name,role:user.role,avatar:user.avatar,text:`${emoji}`,
-      time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),reactions:{}};
+    const now=Date.now();
+    const m={id:now,user:user.name,role:user.role,avatar:user.avatar,text:`${emoji}`,
+      time:new Date(now).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),ts:now,reactions:{}};
     setRooms(rs=>rs.map(r=>r.id===active.id?{...r,messages:[...r.messages,m]}:r));
   };
   if(my.length===0)return(
@@ -1125,7 +1140,7 @@ const RoomsView=({user,rooms,setRooms})=>{
 /* ═══════════════════════════════════════════════════════════
    ADMIN VIEW
 ═══════════════════════════════════════════════════════════ */
-const AdminView=({user,rooms,setRooms,allUsers,onApprove,onReject,onAssignLeader,onRoleChange})=>{
+const AdminView=({user,rooms,setRooms,allUsers,setAllUsers,onApprove,onReject,onAssignLeader,onRoleChange})=>{
   const [subForms,setSubForms]=useState({});
   const leaders=allUsers.filter(u=>u.role==="leader");
   const members=allUsers.filter(u=>u.role!=="admin");
@@ -1162,6 +1177,13 @@ const AdminView=({user,rooms,setRooms,allUsers,onApprove,onReject,onAssignLeader
         return r;
       });
     });
+  };
+  const addMemberByName=(name)=>{
+    const id="u_"+Date.now()+"_"+Math.random().toString(36).slice(2,5);
+    const email=name.toLowerCase().replace(/[^a-z0-9]+/g,".").replace(/(^\\.|\\.$)/g,"") + "@cipher.local";
+    const u={id,email,password:"member123",name,role:"member",avatar:"👤"};
+    if(setAllUsers)setAllUsers(us=>[...us,u]);
+    return u;
   };
   const createSubroom=(mainRoomId,form)=>{
     setRooms(rs=>{
@@ -1323,6 +1345,18 @@ const AdminView=({user,rooms,setRooms,allUsers,onApprove,onReject,onAssignLeader
                                     <option key={m.id} value={m.id}>{m.name}</option>
                                   ))}
                                 </select>
+                                <div style={{display:"flex",gap:6,marginTop:6}}>
+                                  <input className="inp" placeholder="Add member name"
+                                    value={(subForms["add_"+sr.id]||"")}
+                                    onChange={e=>setSubForms(s=>({...s,["add_"+sr.id]:e.target.value}))}/>
+                                  <button className="btn" onClick={()=>{
+                                    const val=subForms["add_"+sr.id];
+                                    if(!val?.trim())return;
+                                    const u=addMemberByName(val.trim());
+                                    assignMember(sr.id,u.id);
+                                    setSubForms(s=>({...s,["add_"+sr.id]:""}));
+                                  }}>ADD</button>
+                                </div>
                               </>
                             )}
                           </div>
@@ -1506,19 +1540,31 @@ const AIView=()=>{
 /* ═══════════════════════════════════════════════════════════
    HISTORY VIEW
 ═══════════════════════════════════════════════════════════ */
-const HistoryView=()=>{
+const HistoryView=({rooms})=>{
   const tc={standup:"var(--cyan)",planning:"var(--purple)","all-hands":"var(--amber)",incident:"var(--red)"};
-  const data=[
-    {date:"Mar 14, 2026",room:"Frontend Team",type:"standup",dur:"24 min",people:8,summary:"PR reviews, mobile layout fix, sprint 7 kickoff."},
-    {date:"Mar 13, 2026",room:"AI/ML Team",type:"planning",dur:"48 min",people:5,summary:"Dataset pipeline finalized. Model v3 benchmarks shared."},
-    {date:"Mar 12, 2026",room:"All Hands",type:"all-hands",dur:"62 min",people:23,summary:"Q1 roadmap, Q2 OKRs, team restructuring update."},
-    {date:"Mar 11, 2026",room:"Backend Team",type:"incident",dur:"18 min",people:6,summary:"DB latency spike resolved. Root cause: missing index on user_events."},
-  ];
+  const data=rooms
+    .filter(r=>r.messages.length>0)
+    .map(r=>{
+      const last=r.messages[r.messages.length-1];
+      const ts=last.ts||Date.now();
+      const dur=Math.max(6,Math.min(60,Math.floor(r.messages.length*3)));
+      return {
+        date:new Date(ts).toLocaleDateString(),
+        room:r.name,
+        type:r.type==="tech"||r.type==="aiml"?"standup":r.type==="finance"?"planning":r.type==="design"?"all-hands":"incident",
+        dur:`${dur} min`,
+        people:r.members.length+r.leaders.length,
+        summary:last.text,
+      };
+    })
+    .sort((a,b)=>new Date(b.date)-new Date(a.date));
   return(
     <div style={{padding:24,overflowY:"auto",height:"calc(100vh - 52px)",animation:"fadeIn .3s"}}>
       <div style={{fontFamily:"var(--disp)",fontSize:18,fontWeight:900,letterSpacing:4,marginBottom:20}}>MEETING HISTORY</div>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
-        {data.map((e,i)=>(
+        {data.length===0?(
+          <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--tm)"}}>No activity yet.</div>
+        ):data.map((e,i)=>(
           <div key={i} className="panel" style={{padding:"15px 18px",display:"flex",gap:16,
             animation:`slideUp ${.2+i*.1}s`,cursor:"pointer",transition:"border-color .2s,box-shadow .2s"}}
             onMouseEnter={el=>{el.currentTarget.style.borderColor="var(--glow)";el.currentTarget.style.boxShadow="0 0 16px rgba(0,255,231,.05)"}}
@@ -1564,7 +1610,7 @@ export default function App(){
   const [view,setView]=useState("home");
   const [modal,setModal]=useState(null);
   const [rooms,setRooms]=useState([]);
-  const [allUsers]=useState(USERS);
+  const [allUsers,setAllUsers]=useState(USERS);
 
   return(
     <>
@@ -1584,7 +1630,7 @@ export default function App(){
           <div style={{flex:1,overflow:"hidden",position:"relative",zIndex:5}}>
             {view==="home"    &&<HomeScreen user={user} rooms={rooms} setView={setView} setModal={setModal}/>}
             {view==="rooms"   &&<RoomsView user={user} rooms={rooms} setRooms={setRooms}/>}
-            {view==="history" &&<HistoryView/>}
+            {view==="history" &&<HistoryView rooms={rooms}/>}
             {view==="ai"      &&<AIView/>}
             {view==="admin"   &&user.role==="admin"&&(
               <AdminView
@@ -1592,6 +1638,7 @@ export default function App(){
                 rooms={rooms}
                 setRooms={setRooms}
                 allUsers={allUsers}
+                setAllUsers={setAllUsers}
               />
             )}
           </div>
@@ -1599,7 +1646,13 @@ export default function App(){
       )}
 
       {modal==="create"&&user&&(
-        <CreateRoomModal onClose={()=>setModal(null)} allUsers={allUsers} onCreate={async(payload)=>{
+        <CreateRoomModal onClose={()=>setModal(null)} allUsers={allUsers} onAddMember={(name)=>{
+          const id="u_"+Date.now()+"_"+Math.random().toString(36).slice(2,5);
+          const email=name.toLowerCase().replace(/[^a-z0-9]+/g,".").replace(/(^\\.|\\.$)/g,"") + "@cipher.local";
+          const u={id,email,password:"member123",name,role:"member",avatar:"👤"};
+          setAllUsers(us=>[...us,u]);
+          return u;
+        }} onCreate={async(payload)=>{
           const iconMap={tech:"⚛",design:"◇",finance:"◈",research:"⬡",aiml:"🧠",devops:"⬟"};
           const room={
             id:"room_"+Date.now(),
