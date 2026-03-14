@@ -1,6 +1,7 @@
 import { sql } from "@vercel/postgres";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_cipherrooms_secret";
 
@@ -10,14 +11,19 @@ export const ensureSchema = async () => {
   await sql`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
-      username TEXT UNIQUE NOT NULL,
       name TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
       role TEXT NOT NULL,
       avatar TEXT NOT NULL,
       password_hash TEXT NOT NULL,
+      reset_token_hash TEXT,
+      reset_token_expires TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT UNIQUE`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_hash TEXT`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMPTZ`;
   await sql`
     CREATE TABLE IF NOT EXISTS rooms (
       id TEXT PRIMARY KEY,
@@ -45,8 +51,8 @@ export const makeCode = () => Math.random().toString(36).slice(2, 8).toUpperCase
 
 export const safeUser = (u) => ({
   id: u.id,
-  username: u.username,
   name: u.name,
+  email: u.email,
   role: u.role,
   avatar: u.avatar,
 });
@@ -56,8 +62,8 @@ export const getUserById = async (id) => {
   return rows[0] || null;
 };
 
-export const getUserByUsername = async (username) => {
-  const { rows } = await sql`SELECT * FROM users WHERE username = ${username} LIMIT 1`;
+export const getUserByEmail = async (email) => {
+  const { rows } = await sql`SELECT * FROM users WHERE email = ${email} LIMIT 1`;
   return rows[0] || null;
 };
 
@@ -72,9 +78,33 @@ export const comparePassword = async (password, hash) => bcrypt.compare(password
 export const signToken = (userId) => jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: "8h" });
 export const verifyToken = (token) => jwt.verify(token, JWT_SECRET);
 
+export const parseCookies = (header = "") => {
+  const out = {};
+  header.split(";").forEach((pair) => {
+    const [k, ...rest] = pair.split("=");
+    if (!k) return;
+    out[k.trim()] = decodeURIComponent(rest.join("=").trim());
+  });
+  return out;
+};
+
+export const setSessionCookie = (res, token) => {
+  const secure = process.env.NODE_ENV === "production" ? "Secure; " : "";
+  res.setHeader(
+    "Set-Cookie",
+    `cr_session=${token}; Path=/; HttpOnly; SameSite=Lax; ${secure}Max-Age=28800`
+  );
+};
+
+export const clearSessionCookie = (res) => {
+  res.setHeader("Set-Cookie", "cr_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+};
+
 export const authUser = async (req, res) => {
   const header = req.headers.authorization || "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  const bearer = header.startsWith("Bearer ") ? header.slice(7) : null;
+  const cookies = parseCookies(req.headers.cookie || "");
+  const token = bearer || cookies.cr_session || null;
   if (!token) {
     res.status(401).json({ error: "Missing token" });
     return null;
@@ -123,4 +153,31 @@ export const toRoomPayload = async (room) => {
     pending: pendingRows.map(safeUser),
     messages: room.messages || [],
   };
+};
+
+const rateStore = new Map();
+export const rateLimit = (req, res, { key, limit, windowMs }) => {
+  const ip = (req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown").toString().split(",")[0].trim();
+  const now = Date.now();
+  const bucketKey = `${key}:${ip}`;
+  const entry = rateStore.get(bucketKey) || { count: 0, resetAt: now + windowMs };
+  if (now > entry.resetAt) {
+    entry.count = 0;
+    entry.resetAt = now + windowMs;
+  }
+  entry.count += 1;
+  rateStore.set(bucketKey, entry);
+  res.setHeader("X-RateLimit-Limit", String(limit));
+  res.setHeader("X-RateLimit-Remaining", String(Math.max(0, limit - entry.count)));
+  if (entry.count > limit) {
+    res.status(429).json({ error: "Too many requests, please try again later" });
+    return false;
+  }
+  return true;
+};
+
+export const makeResetToken = () => {
+  const token = crypto.randomBytes(32).toString("hex");
+  const hash = crypto.createHash("sha256").update(token).digest("hex");
+  return { token, hash };
 };

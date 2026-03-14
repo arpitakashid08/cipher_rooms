@@ -321,16 +321,12 @@ const Intro = ({ onDone }) => {
 };
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
-const tokenKey = "cr_token";
-const getToken = () => localStorage.getItem(tokenKey);
-const setToken = (t) => localStorage.setItem(tokenKey, t);
-const clearToken = () => localStorage.removeItem(tokenKey);
 const api = async (path, options = {}) => {
   const res = await fetch(`${API_BASE}${path}`, {
+    credentials: "include",
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
       ...(options.headers || {}),
     },
   });
@@ -351,20 +347,34 @@ const api = async (path, options = {}) => {
    LOGIN
 ═══════════════════════════════════════════════════════════ */
 const Login = ({ onLogin }) => {
-  const [mode,setMode]=useState("login"); // login | register
-  const [creds,setCreds]=useState({name:"",username:"",password:""});
+  const [mode,setMode]=useState("login"); // login | register | forgot | reset
+  const [creds,setCreds]=useState({name:"",email:"",password:"",token:"",newPassword:""});
   const [err,setErr]=useState("");
   const [loading,setLoading]=useState(false);
+  const [info,setInfo]=useState("");
 
   const go=async()=>{
     setLoading(true);setErr("");
     try{
+      if(mode==="forgot"){
+        const data=await api("/auth/forgot",{method:"POST",body:JSON.stringify({email:creds.email})});
+        setInfo(data.resetToken ? `Reset token: ${data.resetToken}` : "If the email exists, reset instructions were sent.");
+        setMode("reset");
+        setLoading(false);
+        return;
+      }
+      if(mode==="reset"){
+        await api("/auth/reset",{method:"POST",body:JSON.stringify({email:creds.email,token:creds.token,newPassword:creds.newPassword})});
+        setInfo("Password reset successful. You can sign in now.");
+        setMode("login");
+        setLoading(false);
+        return;
+      }
       const path=mode==="login"?"/auth/login":"/auth/register";
       const payload=mode==="login"
-        ? {username:creds.username,password:creds.password}
-        : {name:creds.name,username:creds.username,password:creds.password};
+        ? {email:creds.email,password:creds.password}
+        : {name:creds.name,email:creds.email,password:creds.password};
       const data=await api(path,{method:"POST",body:JSON.stringify(payload)});
-      setToken(data.token);
       onLogin(data.user);
     }catch(e){
       setErr(`ACCESS DENIED — ${e.message}`);
@@ -386,7 +396,7 @@ const Login = ({ onLogin }) => {
         </div>
         <div className="panel" style={{padding:30,border:"1px solid rgba(0,255,231,.22)",boxShadow:"0 0 55px rgba(0,255,231,.06)"}}>
           <div style={{fontFamily:"var(--disp)",fontSize:10,letterSpacing:3,color:"var(--ts)",marginBottom:22}}>
-            {mode==="login"?"SECURE LOGIN":"CREATE ACCOUNT"}
+            {mode==="login"?"SECURE LOGIN":mode==="register"?"CREATE ACCOUNT":mode==="forgot"?"RESET REQUEST":"RESET PASSWORD"}
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:15}}>
             {mode==="register"&&(
@@ -397,23 +407,48 @@ const Login = ({ onLogin }) => {
                   onKeyDown={e=>e.key==="Enter"&&go()}/>
               </div>
             )}
-            <div>
-              <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>USER ID</label>
-              <input className="inp" placeholder="username" value={creds.username}
-                onChange={e=>setCreds({...creds,username:e.target.value})}
-                onKeyDown={e=>e.key==="Enter"&&go()}/>
-            </div>
-            <div>
-              <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>AUTH KEY</label>
-              <input className="inp" type="password" placeholder="password" value={creds.password}
-                onChange={e=>setCreds({...creds,password:e.target.value})}
-                onKeyDown={e=>e.key==="Enter"&&go()}/>
-            </div>
+            {(mode==="login"||mode==="register"||mode==="forgot"||mode==="reset")&&(
+              <div>
+                <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>EMAIL</label>
+                <input className="inp" placeholder="email@domain.com" value={creds.email}
+                  onChange={e=>setCreds({...creds,email:e.target.value})}
+                  onKeyDown={e=>e.key==="Enter"&&go()}/>
+              </div>
+            )}
+            {(mode==="login"||mode==="register")&&(
+              <div>
+                <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>AUTH KEY</label>
+                <input className="inp" type="password" placeholder="password" value={creds.password}
+                  onChange={e=>setCreds({...creds,password:e.target.value})}
+                  onKeyDown={e=>e.key==="Enter"&&go()}/>
+              </div>
+            )}
+            {mode==="reset"&&(
+              <>
+                <div>
+                  <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>RESET TOKEN</label>
+                  <input className="inp" placeholder="paste token" value={creds.token}
+                    onChange={e=>setCreds({...creds,token:e.target.value})}
+                    onKeyDown={e=>e.key==="Enter"&&go()}/>
+                </div>
+                <div>
+                  <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>NEW PASSWORD</label>
+                  <input className="inp" type="password" placeholder="new password" value={creds.newPassword}
+                    onChange={e=>setCreds({...creds,newPassword:e.target.value})}
+                    onKeyDown={e=>e.key==="Enter"&&go()}/>
+                </div>
+              </>
+            )}
+            {info&&<div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--green)",padding:"8px 12px",
+              border:"1px solid rgba(0,255,136,.25)",background:"rgba(0,255,136,.05)",animation:"slideUp .2s"}}>{info}</div>}
             {err&&<div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--red)",padding:"8px 12px",
               border:"1px solid rgba(255,45,85,.25)",background:"rgba(255,45,85,.05)",animation:"slideUp .2s"}}>{err}</div>}
             <button className="btn btn-solid" style={{width:"100%",padding:13,marginTop:4}}
-              onClick={go} disabled={loading||!creds.username||!creds.password||(mode==="register"&&!creds.name)}>
-              {loading?<span style={{animation:"pulse 1s infinite"}}>VERIFYING...</span>:mode==="login"?"AUTHENTICATE →":"CREATE ACCOUNT →"}
+              onClick={go} disabled={loading||!creds.email||((mode==="login"||mode==="register")&&!creds.password)||(mode==="register"&&!creds.name)||(mode==="reset"&&(!creds.token||!creds.newPassword))}>
+              {loading?<span style={{animation:"pulse 1s infinite"}}>VERIFYING...</span>:
+                mode==="login"?"AUTHENTICATE →":
+                mode==="register"?"CREATE ACCOUNT →":
+                mode==="forgot"?"SEND RESET →":"RESET PASSWORD →"}
             </button>
             {mode==="register"&&(
               <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--tm)",lineHeight:1.6}}>
@@ -428,12 +463,21 @@ const Login = ({ onLogin }) => {
             <button onClick={()=>{
               setMode(m=>m==="login"?"register":"login");
               setErr("");
+              setInfo("");
             }}
               style={{background:"none",border:"1px solid var(--dim)",color:"var(--cyan)",fontFamily:"var(--mono)",fontSize:9,
                 cursor:"pointer",letterSpacing:1,padding:"6px 10px",borderRadius:2}}>
               {mode==="login"?"CREATE ONE":"SIGN IN"}
             </button>
           </div>
+          {mode==="login"&&(
+            <div style={{marginTop:10,textAlign:"center"}}>
+              <button onClick={()=>{setMode("forgot");setErr("");setInfo("");}}
+                style={{background:"none",border:"none",color:"var(--ts)",fontFamily:"var(--mono)",fontSize:9,cursor:"pointer",letterSpacing:1}}>
+                FORGOT PASSWORD?
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1147,7 +1191,7 @@ const AdminView=({rooms,setRooms,allUsers,onApprove,onReject,onAssignLeader,onRo
                     <div style={{width:22,height:22,borderRadius:3,background:"var(--elevated)",display:"flex",alignItems:"center",justifyContent:"center"}}>{u.avatar}</div>
                     <div style={{minWidth:0}}>
                       <div style={{fontFamily:"var(--ui)",fontWeight:700,fontSize:11,color:"var(--tx)"}}>{u.name}</div>
-                      <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--ts)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>@{u.username}</div>
+                      <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--ts)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.email}</div>
                     </div>
                   </div>
                   <select onChange={e=>e.target.value&&changeRole(u.id,e.target.value)} defaultValue={u.role}
@@ -1378,14 +1422,13 @@ export default function App(){
 
   useEffect(()=>{
     if(phase!=="login")return;
-    if(!getToken())return;
     (async()=>{
       try{
         const data=await api("/auth/me");
         setUser(data.user);
         setPhase("app");
       }catch{
-        clearToken();
+        // ignore
       }
     })();
   },[phase]);
@@ -1420,7 +1463,10 @@ export default function App(){
       {phase==="app"&&user&&(
         <div style={{width:"100vw",height:"100vh",display:"flex",flexDirection:"column",overflow:"hidden",position:"relative"}}>
           <CircuitBg/><HexGrid/><ScanLine/>
-          <TopBar view={view} setView={setView} user={user} onLogout={()=>{clearToken();setUser(null);setRooms([]);setAllUsers([]);setView("home");setPhase("login");}}/>
+          <TopBar view={view} setView={setView} user={user} onLogout={async()=>{
+            try{await api("/auth/logout",{method:"POST"});}catch{}
+            setUser(null);setRooms([]);setAllUsers([]);setView("home");setPhase("login");
+          }}/>
           <div style={{flex:1,overflow:"hidden",position:"relative",zIndex:5}}>
             {view==="home"    &&<HomeScreen user={user} rooms={rooms} setView={setView} setModal={setModal}/>}
             {view==="rooms"   &&<RoomsView user={user} rooms={rooms} setRooms={setRooms}/>}
