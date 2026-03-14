@@ -320,7 +320,7 @@ const Intro = ({ onDone }) => {
   );
 };
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5174";
+const API_BASE = import.meta.env.VITE_API_URL || "";
 const tokenKey = "cr_token";
 const getToken = () => localStorage.getItem(tokenKey);
 const setToken = (t) => localStorage.setItem(tokenKey, t);
