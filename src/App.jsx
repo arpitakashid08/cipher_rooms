@@ -1,5 +1,48 @@
 import { useState, useEffect, useRef } from "react";
 
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+const bufToB64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const b64ToBuf = (b64) => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+const importKey = async (keyB64) => {
+  const raw = b64ToBuf(keyB64);
+  return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt","decrypt"]);
+};
+const genKey = async () => {
+  const key = await crypto.subtle.generateKey({ name:"AES-GCM", length:256 }, true, ["encrypt","decrypt"]);
+  const raw = await crypto.subtle.exportKey("raw", key);
+  return bufToB64(raw);
+};
+const encryptText = async (text, keyB64) => {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await importKey(keyB64);
+  const cipher = await crypto.subtle.encrypt({ name:"AES-GCM", iv }, key, enc.encode(text));
+  return { cipher: bufToB64(cipher), iv: bufToB64(iv) };
+};
+const decryptText = async (cipherB64, ivB64, keyB64) => {
+  const key = await importKey(keyB64);
+  const plain = await crypto.subtle.decrypt({ name:"AES-GCM", iv: b64ToBuf(ivB64) }, key, b64ToBuf(cipherB64));
+  return dec.decode(plain);
+};
+
+const API_URL = import.meta.env.VITE_API_URL || (window.location.port==="5173" ? "http://localhost:5174" : window.location.origin);
+const safeJson = (text) => {
+  try { return text ? JSON.parse(text) : {}; } catch { return {}; }
+};
+const apiFetch = async (path, opts = {}) => {
+  const token = localStorage.getItem("cipher_token");
+  const headers = {
+    "Content-Type":"application/json",
+    ...(opts.headers || {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  };
+  const res = await fetch(`${API_URL}${path}`, { ...opts, headers });
+  const text = await res.text();
+  const data = safeJson(text);
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
+};
+
 /* ═══════════════════════════════════════════════════════════
    GLOBAL STYLES
 ═══════════════════════════════════════════════════════════ */
@@ -321,34 +364,29 @@ const Intro = ({ onDone }) => {
 };
 
 /* ═══════════════════════════════════════════════════════════
-   DEMO USERS
-═══════════════════════════════════════════════════════════ */
-const USERS = [
-  {id:"u0",email:"admin_cipher@cipher.com",  password:"cipher@2024",name:"Alex Morgan",    role:"admin", avatar:"👑"},
-  {id:"u1",email:"sarah_frontend@cipher.com",password:"front123",   name:"Sarah Kim",      role:"leader",avatar:"⚛"},
-  {id:"u2",email:"marcus_back@cipher.com",   password:"back456",    name:"Marcus Thompson",role:"leader",avatar:"⬡"},
-  {id:"u3",email:"priya_ai@cipher.com",      password:"aiml789",    name:"Priya Rajan",    role:"leader",avatar:"◈"},
-  {id:"u4",email:"dev_alex@cipher.com",      password:"dev001",     name:"Alex Chen",      role:"member",avatar:"⚡"},
-  {id:"u5",email:"dev_jamie@cipher.com",     password:"dev002",     name:"Jamie Liu",      role:"member",avatar:"🌟"},
-  {id:"u6",email:"design_leo@cipher.com",    password:"des789",     name:"Leo Martin",     role:"member",avatar:"◇"},
-];
-
-/* ═══════════════════════════════════════════════════════════
    LOGIN
 ═══════════════════════════════════════════════════════════ */
-const Login = ({ onLogin }) => {
-  const [creds,setCreds]=useState({email:"",password:""});
+const Login = ({ onLogin, onReplayIntro }) => {
+  const [mode,setMode]=useState("login");
+  const [creds,setCreds]=useState({name:"",username:"",password:""});
   const [err,setErr]=useState("");
   const [loading,setLoading]=useState(false);
-  const [showCreds,setShowCreds]=useState(false);
-
-  const go=()=>{
+  const go=async()=>{
     setLoading(true);setErr("");
-    setTimeout(()=>{
-      const u=USERS.find(u=>u.email===creds.email&&u.password===creds.password);
-      if(u)onLogin(u);
-      else{setErr("ACCESS DENIED — Invalid credentials");setLoading(false);}
-    },500);
+    try{
+      if(mode==="login"){
+        const data=await apiFetch("/auth/login",{method:"POST",body:JSON.stringify({username:creds.username,password:creds.password})});
+        localStorage.setItem("cipher_token",data.token);
+        onLogin(data.user);
+      }else{
+        const data=await apiFetch("/auth/register",{method:"POST",body:JSON.stringify({name:creds.name,username:creds.username,password:creds.password})});
+        localStorage.setItem("cipher_token",data.token);
+        onLogin(data.user);
+      }
+    }catch(e){
+      setErr(e.message||"ACCESS DENIED — Invalid credentials");
+      setLoading(false);
+    }
   };
 
   return(
@@ -366,10 +404,18 @@ const Login = ({ onLogin }) => {
         <div className="panel" style={{padding:30,border:"1px solid rgba(0,255,231,.22)",boxShadow:"0 0 55px rgba(0,255,231,.06)"}}>
           <div style={{fontFamily:"var(--disp)",fontSize:10,letterSpacing:3,color:"var(--ts)",marginBottom:22}}>SECURE LOGIN</div>
           <div style={{display:"flex",flexDirection:"column",gap:15}}>
+            {mode==="register"&&(
+              <div>
+                <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>NAME</label>
+                <input className="inp" placeholder="Full name" value={creds.name}
+                  onChange={e=>setCreds({...creds,name:e.target.value})}
+                  onKeyDown={e=>e.key==="Enter"&&go()}/>
+              </div>
+            )}
             <div>
-              <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>EMAIL</label>
-              <input className="inp" placeholder="email@domain.com" value={creds.email}
-                onChange={e=>setCreds({...creds,email:e.target.value})}
+              <label style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,display:"block",marginBottom:6}}>USERNAME</label>
+              <input className="inp" placeholder="username" value={creds.username}
+                onChange={e=>setCreds({...creds,username:e.target.value})}
                 onKeyDown={e=>e.key==="Enter"&&go()}/>
             </div>
             <div>
@@ -381,32 +427,25 @@ const Login = ({ onLogin }) => {
             {err&&<div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--red)",padding:"8px 12px",
               border:"1px solid rgba(255,45,85,.25)",background:"rgba(255,45,85,.05)",animation:"slideUp .2s"}}>{err}</div>}
             <button className="btn btn-solid" style={{width:"100%",padding:13,marginTop:4}}
-              onClick={go} disabled={loading||!creds.email||!creds.password}>
-              {loading?<span style={{animation:"pulse 1s infinite"}}>VERIFYING...</span>:"AUTHENTICATE →"}
+              onClick={go} disabled={loading||!creds.username||!creds.password||(mode==="register"&&!creds.name)}>
+              {loading?<span style={{animation:"pulse 1s infinite"}}>VERIFYING...</span>:mode==="login"?"AUTHENTICATE →":"CREATE ACCOUNT →"}
             </button>
           </div>
-          <div style={{marginTop:18,borderTop:"1px solid var(--dim)",paddingTop:15}}>
-            <button onClick={()=>setShowCreds(s=>!s)}
-              style={{background:"none",border:"none",color:"var(--ts)",fontFamily:"var(--mono)",fontSize:9,
-                cursor:"pointer",letterSpacing:1,display:"flex",alignItems:"center",gap:6}}>
-              {showCreds?"▾":"▸"} VIEW TEST CREDENTIALS
+          <div style={{marginTop:18,borderTop:"1px solid var(--dim)",paddingTop:15,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)"}}>
+              {mode==="login"?"Need an account?":"Have an account?"}
+            </span>
+            <button onClick={()=>setMode(m=>m==="login"?"register":"login")}
+              style={{background:"none",border:"none",color:"var(--cyan)",fontFamily:"var(--mono)",fontSize:9,
+                cursor:"pointer",letterSpacing:1}}>
+              {mode==="login"?"CREATE ACCOUNT":"BACK TO LOGIN"}
             </button>
-            {showCreds&&(
-              <div style={{marginTop:11,display:"flex",flexDirection:"column",gap:3,animation:"slideUp .2s"}}>
-                {USERS.map(u=>(
-                  <div key={u.id} onClick={()=>setCreds({email:u.email,password:u.password})}
-                    style={{display:"flex",gap:10,padding:"6px 10px",cursor:"pointer",borderRadius:2,
-                      transition:"background .15s",fontFamily:"var(--mono)",fontSize:10}}
-                    onMouseEnter={e=>e.currentTarget.style.background="rgba(0,255,231,.05)"}
-                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                    <span style={{width:20}}>{u.avatar}</span>
-                    <span style={{color:"var(--cyan)",flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{u.email}</span>
-                    <span style={{color:"var(--tm)"}}>{u.password}</span>
-                    <span className="tag" style={{color:u.role==="admin"?"var(--amber)":u.role==="leader"?"var(--purple)":"var(--green)",fontSize:8}}>{u.role.toUpperCase()}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+          </div>
+          <div style={{marginTop:12,display:"flex",justifyContent:"center"}}>
+            <button onClick={onReplayIntro} style={{background:"none",border:"1px solid var(--dim)",color:"var(--ts)",
+              fontFamily:"var(--mono)",fontSize:9,padding:"6px 10px",cursor:"pointer",letterSpacing:1}}>
+              REPLAY INTRO
+            </button>
           </div>
         </div>
       </div>
@@ -419,10 +458,10 @@ const Login = ({ onLogin }) => {
 ═══════════════════════════════════════════════════════════ */
 const TopBar=({view,setView,user,onLogout})=>{
   const nav=user.role==="admin"
-    ?[{id:"home",l:"HOME"},{id:"rooms",l:"ROOMS"},{id:"history",l:"HISTORY"},{id:"ai",l:"CIPHERMIND"},{id:"admin",l:"ADMIN"}]
+    ?[{id:"home",l:"HOME"},{id:"rooms",l:"ROOMS"},{id:"history",l:"HISTORY"},{id:"admin",l:"ADMIN"}]
     :user.role==="leader"
-    ?[{id:"home",l:"HOME"},{id:"rooms",l:"ROOMS"},{id:"history",l:"HISTORY"},{id:"ai",l:"CIPHERMIND"}]
-    :[{id:"home",l:"HOME"},{id:"rooms",l:"ROOMS"},{id:"ai",l:"CIPHERMIND"}];
+    ?[{id:"home",l:"HOME"},{id:"rooms",l:"ROOMS"},{id:"history",l:"HISTORY"}]
+    :[{id:"home",l:"HOME"},{id:"rooms",l:"ROOMS"}];
   return(
     <header style={{height:52,display:"flex",alignItems:"center",justifyContent:"space-between",
       padding:"0 20px",background:"rgba(4,10,18,.96)",borderBottom:"1px solid var(--dim)",
@@ -500,12 +539,10 @@ const HomeScreen=({user,rooms,setView,setModal})=>{
   /* secondary quick-links vary by role */
   const quickLinks = user.role==="admin"
     ? [{icon:"⬡",label:"Admin Panel",   sub:"Manage rooms & members", action:()=>setView("admin")},
-       {icon:"◈",label:"CipherMind AI", sub:"AI collaboration tools",  action:()=>setView("ai")},
        {icon:"📋",label:"History",       sub:"Meeting transcripts",     action:()=>setView("history")}]
     : user.role==="leader"
-    ? [{icon:"◈",label:"CipherMind AI", sub:"AI collaboration tools",  action:()=>setView("ai")},
-       {icon:"📋",label:"History",       sub:"Meeting transcripts",     action:()=>setView("history")}]
-    : [{icon:"◈",label:"CipherMind AI", sub:"AI collaboration tools",  action:()=>setView("ai")}];
+    ? [{icon:"📋",label:"History",       sub:"Meeting transcripts",     action:()=>setView("history")}]
+    : [];
 
   return(
     <div style={{height:"calc(100vh - 52px)",overflowY:"auto",animation:"fadeIn .35s"}}>
@@ -844,9 +881,11 @@ const CreateRoomModal=({onClose,onCreate,allUsers,onAddMember})=>{
                 value={newMember} onChange={e=>setNewMember(e.target.value)}/>
               <button className="btn" onClick={()=>{
                 if(!newMember.trim()||!onAddMember)return;
-                const u=onAddMember(newMember.trim());
-                setSelectedMembers(ms=>[...ms,u]);
-                setNewMember("");
+                Promise.resolve(onAddMember(newMember.trim())).then(u=>{
+                  if(!u)return;
+                  setSelectedMembers(ms=>[...ms,u]);
+                  setNewMember("");
+                });
               }}>ADD</button>
             </div>
           </div>
@@ -930,71 +969,215 @@ const JoinRoomModal=({onClose,onRequest})=>{
 /* ═══════════════════════════════════════════════════════════
    ROOMS VIEW
 ═══════════════════════════════════════════════════════════ */
-const RoomsView=({user,rooms,setRooms})=>{
-  const my=rooms.filter(r=>user.role==="admin"||r.leaders.some(l=>l.id===user.id)||r.members.some(m=>m.id===user.id));
-  const [activeId,setActiveId]=useState(my[0]?.id||null);
+const RoomsView=({user,rooms,setRooms,allUsers,setAllUsers,onReload})=>{
+  if(!Array.isArray(rooms)) return (
+    <div style={{height:"calc(100vh - 52px)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--red)"}}>Rooms data unavailable.</div>
+    </div>
+  );
+  const normalizeLocal=(list=[])=>list.map(r=>({
+    ...r,
+    leaders:Array.isArray(r.leaders)?r.leaders:[],
+    members:Array.isArray(r.members)?r.members:[],
+    pending:Array.isArray(r.pending)?r.pending:[],
+    messages:Array.isArray(r.messages)?r.messages:[],
+    accessGrants:Array.isArray(r.accessGrants)?r.accessGrants:[],
+    pendingAccess:Array.isArray(r.pendingAccess)?r.pendingAccess:[],
+    pinned:Array.isArray(r.pinned)?r.pinned:[],
+  }));
+  const my=rooms.filter(r=>user.role==="admin"||(r.leaders||[]).some(l=>l.id===user.id)||(r.members||[]).some(m=>m.id===user.id));
+  useEffect(()=>{
+    try {
+      console.log("[rooms] raw", rooms);
+      console.log("[rooms] my", my);
+    } catch {}
+  },[rooms]);
+  const [activeId,setActiveId]=useState(null);
   const [msg,setMsg]=useState("");
   const endRef=useRef(null);
   const fileInputRef=useRef(null);
-  useEffect(()=>{
-    if(!activeId||!my.find(r=>r.id===activeId))setActiveId(my[0]?.id||null);
-  },[my,activeId]);
-  useEffect(()=>endRef.current?.scrollIntoView({behavior:"smooth"}),[activeId,rooms]);
+  const videoRef=useRef(null);
+  const audioStreamRef=useRef(null);
+  const camStreamRef=useRef(null);
+  const [subForm,setSubForm]=useState({name:"",type:"tech",access:"private",leaderId:"",members:[]});
+  const [newMember,setNewMember]=useState("");
+  const [aiError,setAiError]=useState("");
+  const [decrypted,setDecrypted]=useState({});
+  const [voiceOn,setVoiceOn]=useState(false);
+  const [camOn,setCamOn]=useState(false);
+  const [accessStatus,setAccessStatus]=useState("");
+  useEffect(()=>{ if(onReload) onReload(); },[]);
+  const refreshRooms=async()=>{
+    if(onReload) return onReload();
+    const data=await apiFetch("/rooms");
+    setRooms(normalizeLocal(data.rooms||[]));
+  };
   const active=rooms.find(r=>r.id===activeId);
   const isMainRoom=active && !active.parentId;
   const isMainUser=active && active.createdBy===user.id;
   const isLeader=active && active.leaders.some(l=>l.id===user.id);
   const isMember=active && active.members.some(m=>m.id===user.id);
-  const canPost=active && (isMainRoom ? (isMainUser||isLeader) : (isMainUser||isLeader||isMember));
-  const send=()=>{
-    if(!msg.trim()||!active||!canPost)return;
+  const roomEncrypted=active ? (active.encrypted ?? Boolean(active.parentId)) : false;
+  const accessGrants=active?.accessGrants||[];
+  const hasAccess=!roomEncrypted || accessGrants.includes(user.id);
+  const canPost=active && hasAccess && (isMainRoom ? (isMainUser||isLeader) : (isMainUser||isLeader||isMember));
+  const subrooms=active ? rooms.filter(r=>r.parentId===active.id) : [];
+  useEffect(()=>{
+    if(my.length && (!activeId || !my.find(r=>r.id===activeId))) setActiveId(my[0].id);
+    if(!my.length) setActiveId(null);
+  },[my,activeId]);
+  useEffect(()=>endRef.current?.scrollIntoView({behavior:"smooth"}),[activeId,rooms]);
+  useEffect(()=>{
+    if(hasAccess)setAccessStatus("");
+  },[hasAccess]);
+  useEffect(()=>{
+    if(audioStreamRef.current){audioStreamRef.current.getTracks().forEach(t=>t.stop());audioStreamRef.current=null;}
+    if(camStreamRef.current){camStreamRef.current.getTracks().forEach(t=>t.stop());camStreamRef.current=null;}
+    setVoiceOn(false);setCamOn(false);
+  },[activeId]);
+  const pushMessage=async(text,opts={})=>{
+    if(!active)return;
+    if(roomEncrypted&&!hasAccess)return;
     const now=Date.now();
-    const m={id:now,user:user.name,role:user.role,avatar:user.avatar,text:msg.trim(),
+    const base={id:now,user:opts.user||user.name,role:opts.role||user.role,avatar:opts.avatar||user.avatar,
       time:new Date(now).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),ts:now,reactions:{}};
-    setRooms(rs=>rs.map(r=>r.id===active.id?{...r,messages:[...r.messages,m]}:r));
+    if(roomEncrypted&&!active.encKey){
+      setAiError("Encryption key missing for this room.");
+      return;
+    }
+    if(roomEncrypted&&active.encKey){
+      const {cipher,iv}=await encryptText(text,active.encKey);
+      const m={...base,cipher,iv,text:""};
+      await apiFetch(`/rooms/${active.id}/message`,{method:"POST",body:JSON.stringify({message:m})});
+      await refreshRooms();
+    }else{
+      const m={...base,text};
+      await apiFetch(`/rooms/${active.id}/message`,{method:"POST",body:JSON.stringify({message:m})});
+      await refreshRooms();
+    }
+  };
+  const send=async()=>{
+    if(!msg.trim()||!active||!canPost)return;
+    await pushMessage(msg.trim());
     setMsg("");
   };
-  const addSystemMessage=(text)=>{
+  const addSystemMessage=async(text)=>{
     if(!active)return;
-    const now=Date.now();
-    const m={id:now,user:"CipherMind AI",role:"ai",avatar:"🤖",text,
-      time:new Date(now).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),ts:now,reactions:{}};
-    setRooms(rs=>rs.map(r=>r.id===active.id?{...r,messages:[...r.messages,m]}:r));
-  };
-  const summarize=()=>{
-    if(!active)return;
-    const last=active.messages.slice(-6).map(m=>m.text).join(" ");
-    addSystemMessage(last?`Summary: ${last.slice(0,120)}${last.length>120?"…":""}`:"Summary: No messages yet.");
-  };
-  const ideas=()=>{
-    addSystemMessage("Ideas: Break tasks into milestones, assign owners, and set a short daily standup cadence.");
+    await pushMessage(text,{user:"System",role:"system",avatar:"⚙"});
   };
   const onAttach=()=>{
     if(!active||!canPost)return;
     fileInputRef.current?.click();
   };
-  const onFileChange=(e)=>{
+  const onFileChange=async(e)=>{
     const f=e.target.files?.[0];
     if(!f||!active)return;
-    const now=Date.now();
-    const m={id:now,user:user.name,role:user.role,avatar:user.avatar,text:`📎 Attached file: ${f.name}`,
-      time:new Date(now).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),ts:now,reactions:{}};
-    setRooms(rs=>rs.map(r=>r.id===active.id?{...r,messages:[...r.messages,m]}:r));
+    await pushMessage(`📎 Attached file: ${f.name}`);
     e.target.value="";
   };
-  const quickReact=(emoji)=>{
+  const quickReact=async(emoji)=>{
     if(!active||!canPost)return;
-    const now=Date.now();
-    const m={id:now,user:user.name,role:user.role,avatar:user.avatar,text:`${emoji}`,
-      time:new Date(now).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),ts:now,reactions:{}};
-    setRooms(rs=>rs.map(r=>r.id===active.id?{...r,messages:[...r.messages,m]}:r));
+    await pushMessage(`${emoji}`);
   };
+  const ensureLeader=async(uid)=>{
+    if(!setAllUsers)return;
+    await apiFetch(`/users/${uid}/role`,{method:"POST",body:JSON.stringify({role:"leader"})});
+    const data=await apiFetch("/users");
+    setAllUsers(data.users||[]);
+  };
+  const createSubroom=async()=>{
+    if(!active||!isMainRoom||!isMainUser||!subForm.name||!subForm.leaderId)return;
+    const leader=allUsers.find(u=>u.id===subForm.leaderId);
+    if(!leader)return;
+    await ensureLeader(leader.id);
+    const iconMap={tech:"⚛",design:"◇",finance:"◈",research:"⬡",aiml:"🧠",devops:"⬟"};
+    const memberList=[leader,...subForm.members.map(id=>allUsers.find(u=>u.id===id)).filter(Boolean)];
+    const keyB64=await genKey();
+    await apiFetch(`/rooms/${active.id}/subroom`,{
+      method:"POST",
+      body:JSON.stringify({
+        name:subForm.name,type:subForm.type,access:subForm.access,
+        leaderId:leader.id,
+        memberIds:memberList.map(m=>m.id),
+        encrypted:true,
+        encKey:keyB64
+      })
+    });
+    await refreshRooms();
+    setSubForm({name:"",type:"tech",access:"private",leaderId:"",members:[]});
+  };
+  const assignMember=async(roomId,userId)=>{
+    await apiFetch(`/rooms/${roomId}/assign-member`,{method:"POST",body:JSON.stringify({userId})});
+    await refreshRooms();
+  };
+  const assignLeader=async(roomId,userId)=>{
+    await ensureLeader(userId);
+    await apiFetch(`/rooms/${roomId}/assign-leader`,{method:"POST",body:JSON.stringify({userId})});
+    await refreshRooms();
+  };
+  const addMemberByName=async()=>{
+    if(!newMember.trim())return null;
+    const username=window.prompt("Set username for new member");
+    if(!username)return null;
+    const password=window.prompt("Set password for new member");
+    if(!password)return null;
+    const data=await apiFetch("/users",{method:"POST",body:JSON.stringify({name:newMember.trim(),username,password,role:"member"})});
+    setAllUsers(us=>[data.user,...us]);
+    setNewMember("");
+    return data.user;
+  };
+  const requestAccess=async()=>{
+    if(!active||!roomEncrypted)return;
+    await apiFetch(`/rooms/${active.id}/request-access`,{method:"POST"});
+    await refreshRooms();
+    setAccessStatus("requested");
+  };
+  const approveAccess=async(roomId,userId)=>{
+    await apiFetch(`/rooms/${roomId}/grant-access`,{method:"POST",body:JSON.stringify({userId})});
+    await refreshRooms();
+  };
+  const togglePin=async(msgId)=>{
+    if(!active)return;
+    await apiFetch(`/rooms/${active.id}/pin`,{method:"POST",body:JSON.stringify({messageId:msgId})});
+    await refreshRooms();
+  };
+  const getTranscript=()=>{
+    if(!active)return "";
+    return active.messages.map(m=>{
+      if(m.cipher){
+        return hasAccess ? (decrypted[m.id]||"") : "[encrypted]";
+      }
+      return m.text||"";
+    }).filter(Boolean).join("\n");
+  };
+  const aiSummarize=null;
+  const aiSuggest=null;
+  useEffect(()=>{
+    let mounted=true;
+    if(!active||!roomEncrypted||!hasAccess){setDecrypted({});return;}
+    const key=active.encKey;
+    if(!key){setDecrypted({});return;}
+    (async()=>{
+      const out={};
+      for(const m of active.messages){
+        if(!m.cipher)continue;
+        try{
+          out[m.id]=await decryptText(m.cipher,m.iv,key);
+        }catch{
+          out[m.id]="[decryption failed]";
+        }
+      }
+      if(mounted)setDecrypted(out);
+    })();
+    return()=>{mounted=false;};
+  },[activeId,rooms,roomEncrypted,hasAccess]);
   if(my.length===0)return(
     <div style={{height:"calc(100vh - 52px)",display:"flex",alignItems:"center",justifyContent:"center",animation:"fadeIn .3s"}}>
       <div style={{textAlign:"center"}}>
         <div style={{fontSize:38,opacity:.3,marginBottom:14}}>⬡</div>
         <div style={{fontFamily:"var(--disp)",fontSize:11,letterSpacing:3,color:"var(--ts)"}}>NO ROOMS AVAILABLE</div>
         <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--tm)",marginTop:7}}>You haven't been assigned to any room yet.</div>
+        {onReload&&<button className="btn" style={{marginTop:12}} onClick={onReload}>REFRESH ROOMS</button>}
       </div>
     </div>
   );
@@ -1004,7 +1187,9 @@ const RoomsView=({user,rooms,setRooms})=>{
         <div style={{padding:"13px 13px 9px",borderBottom:"1px solid var(--dim)"}}>
           <div style={{fontFamily:"var(--disp)",fontSize:9,letterSpacing:3,color:"var(--ts)"}}>ROOMS</div>
         </div>
-        {my.map(r=>(
+        {my.map(r=>{
+          const locked=(r.encrypted??Boolean(r.parentId)) && !(r.accessGrants||[]).includes(user.id);
+          return(
           <div key={r.id} onClick={()=>setActiveId(r.id)} style={{padding:"10px 13px",display:"flex",
             alignItems:"center",gap:9,cursor:"pointer",
             background:activeId===r.id?"rgba(0,255,231,.07)":"transparent",
@@ -1017,8 +1202,9 @@ const RoomsView=({user,rooms,setRooms})=>{
                 {r.parentId?"PERSONALIZED":"MAIN"} · {r.members.length+r.leaders.length} members
               </div>
             </div>
+            {locked&&<span style={{fontSize:12,opacity:.6}}>🔒</span>}
           </div>
-        ))}
+        )})}
       </div>
       {active&&<>
         <div style={{flex:1,display:"flex",flexDirection:"column",minWidth:0}}>
@@ -1029,7 +1215,7 @@ const RoomsView=({user,rooms,setRooms})=>{
               <div>
                 <div style={{fontFamily:"var(--disp)",fontSize:11,letterSpacing:2,color:"var(--tx)"}}>{active.name}</div>
                 <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--ts)"}}>
-                  {active.type.toUpperCase()} · {active.access.toUpperCase()}{active.parentId?" · PERSONALIZED":""}
+                  {active.type.toUpperCase()} · {active.access.toUpperCase()}{active.parentId?" · PERSONALIZED":""}{roomEncrypted?" · ENCRYPTED":""}
                 </div>
               </div>
             </div>
@@ -1060,6 +1246,21 @@ const RoomsView=({user,rooms,setRooms})=>{
             </div>
           </div>
           <div style={{flex:1,overflowY:"auto",padding:"17px 17px 0",display:"flex",flexDirection:"column",gap:13}}>
+            {(active.pinned||[]).length>0&&(
+              <div style={{border:"1px solid var(--dim)",padding:"10px 12px",borderRadius:2,background:"rgba(0,255,231,.03)"}}>
+                <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",marginBottom:6}}>📌 PINNED</div>
+                {(active.pinned||[]).map(pid=>{
+                  const pm=active.messages.find(x=>x.id===pid);
+                  if(!pm)return null;
+                  const text=pm.cipher ? (hasAccess ? (decrypted[pm.id]||"Decrypting...") : "🔒 Encrypted message") : pm.text;
+                  return (
+                    <div key={pid} style={{fontFamily:"var(--ui)",fontSize:12,color:"var(--tx)",marginBottom:4}}>
+                      {text}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {active.messages.length===0?(
               <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center"}}>
                 <div style={{textAlign:"center",opacity:.35}}>
@@ -1075,17 +1276,44 @@ const RoomsView=({user,rooms,setRooms})=>{
                 <div style={{flex:1}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
                     <span style={{fontFamily:"var(--ui)",fontWeight:600,fontSize:12,
-                      color:m.role==="admin"?"var(--amber)":m.role==="leader"?"var(--purple)":m.role==="ai"?"var(--cyan)":"var(--tx)"}}>{m.user}</span>
-                    <span className="tag" style={{color:m.role==="admin"?"var(--amber)":m.role==="leader"?"var(--purple)":m.role==="ai"?"var(--cyan)":"var(--green)",fontSize:8}}>{m.role.toUpperCase()}</span>
+                      color:m.role==="admin"?"var(--amber)":m.role==="leader"?"var(--purple)":m.role==="system"?"var(--cyan)":"var(--tx)"}}>{m.user}</span>
+                    <span className="tag" style={{color:m.role==="admin"?"var(--amber)":m.role==="leader"?"var(--purple)":m.role==="system"?"var(--cyan)":"var(--green)",fontSize:8}}>{m.role.toUpperCase()}</span>
                     <span style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--tm)"}}>{m.time}</span>
+                    {(isMainUser||isLeader)&&(
+                      <button onClick={()=>togglePin(m.id)} style={{background:"transparent",border:"1px solid var(--dim)",color:"var(--ts)",
+                        fontFamily:"var(--mono)",fontSize:8,padding:"2px 6px",cursor:"pointer",borderRadius:2}}>
+                        {(active.pinned||[]).includes(m.id)?"UNPIN":"PIN"}
+                      </button>
+                    )}
                   </div>
-                  <div style={{fontFamily:"var(--ui)",fontSize:13,color:"var(--ts)",lineHeight:1.65}}>{m.text}</div>
+                  <div style={{fontFamily:"var(--ui)",fontSize:13,color:"var(--ts)",lineHeight:1.65}}>
+                    {m.cipher ? (hasAccess ? (decrypted[m.id]||"Decrypting...") : "🔒 Encrypted message") : m.text}
+                  </div>
                 </div>
               </div>
             ))}
             <div ref={endRef}/>
           </div>
           <div style={{padding:"11px 17px 15px",borderTop:"1px solid var(--dim)",flexShrink:0}}>
+            {roomEncrypted&&!hasAccess&&(
+              <div style={{marginBottom:10,display:"flex",alignItems:"center",gap:10,background:"rgba(255,184,0,.08)",
+                border:"1px solid rgba(255,184,0,.35)",padding:"8px 10px",borderRadius:2}}>
+                <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--amber)"}}>🔒 Encrypted room · Access required</div>
+                <button className="btn" style={{padding:"5px 10px"}} onClick={requestAccess}>REQUEST ACCESS</button>
+                {accessStatus==="requested"&&<span style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--ts)"}}>Request sent</span>}
+              </div>
+            )}
+            {isLeader&&(active?.pendingAccess||[]).length>0&&(
+              <div style={{marginBottom:10,background:"var(--surface)",border:"1px solid var(--dim)",padding:"8px 10px",borderRadius:2}}>
+                <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",marginBottom:6}}>ACCESS REQUESTS</div>
+                {(active.pendingAccess||[]).map(p=>(
+                  <div key={p.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                    <span style={{fontFamily:"var(--ui)",fontSize:11,color:"var(--tx)"}}>{p.name}</span>
+                    <button className="btn" style={{padding:"4px 8px"}} onClick={()=>approveAccess(active.id,p.id)}>GRANT</button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div style={{display:"flex",gap:6,marginBottom:8}}>
               {["👍","👎","💡","⚡"].map(r=>(
                 <button key={r} style={{background:"var(--surface)",border:"1px solid var(--dim)",padding:"3px 9px",
@@ -1097,18 +1325,120 @@ const RoomsView=({user,rooms,setRooms})=>{
             </div>
             <div style={{display:"flex",gap:8,marginBottom:8}}>
               <button className="btn" style={{padding:"6px 10px",fontSize:10}} onClick={onAttach}>ATTACH FILE</button>
-              <button className="btn" style={{padding:"6px 10px",fontSize:10}} onClick={()=>addSystemMessage("Voice chat started (demo).")}>VOICE</button>
-              <button className="btn" style={{padding:"6px 10px",fontSize:10}} onClick={()=>addSystemMessage("Camera session started (demo).")}>CAMERA</button>
-              <button className="btn" style={{padding:"6px 10px",fontSize:10}} onClick={summarize}>AI SUMMARY</button>
-              <button className="btn" style={{padding:"6px 10px",fontSize:10}} onClick={ideas}>IDEA GEN</button>
+              <button className="btn" style={{padding:"6px 10px",fontSize:10}} onClick={async()=>{
+                if(voiceOn){
+                  if(audioStreamRef.current){audioStreamRef.current.getTracks().forEach(t=>t.stop());audioStreamRef.current=null;}
+                  setVoiceOn(false);
+                  await addSystemMessage("Voice chat stopped.");
+                  return;
+                }
+                try{
+                  const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+                  audioStreamRef.current=stream;
+                  setVoiceOn(true);
+                  await addSystemMessage("Voice chat started.");
+                }catch(e){
+                  setAiError("Microphone access denied.");
+                }
+              }}>{voiceOn?"VOICE ON":"VOICE"}</button>
+              <button className="btn" style={{padding:"6px 10px",fontSize:10}} onClick={async()=>{
+                if(camOn){
+                  if(camStreamRef.current){camStreamRef.current.getTracks().forEach(t=>t.stop());camStreamRef.current=null;}
+                  if(videoRef.current)videoRef.current.srcObject=null;
+                  setCamOn(false);
+                  await addSystemMessage("Camera session stopped.");
+                  return;
+                }
+                try{
+                  const stream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+                  camStreamRef.current=stream;
+                  if(videoRef.current)videoRef.current.srcObject=stream;
+                  setCamOn(true);
+                  await addSystemMessage("Camera session started.");
+                }catch(e){
+                  setAiError("Camera access denied.");
+                }
+              }}>{camOn?"CAM ON":"CAMERA"}</button>
+              {/* AI features removed for now */}
             </div>
+            {aiError&&<div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--red)",marginBottom:8}}>{aiError}</div>}
+            {camOn&&(
+              <div style={{marginBottom:8,display:"flex",gap:8,alignItems:"center"}}>
+                <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)"}}>LIVE CAMERA</div>
+                <video ref={videoRef} autoPlay muted playsInline style={{width:120,height:80,border:"1px solid var(--dim)",borderRadius:2,background:"#000"}}/>
+              </div>
+            )}
             <div style={{display:"flex",gap:8}}>
-              <input className="inp" style={{flex:1}} placeholder={canPost?"Encrypted message...":"Read-only · Main room is leader-only"}
+              <input className="inp" style={{flex:1}} placeholder={
+                !hasAccess&&roomEncrypted?"Access required to decrypt and send":
+                canPost?(roomEncrypted?"Encrypted message...":"Message..."):"Read-only · Main room is leader-only"
+              }
                 value={msg} onChange={e=>setMsg(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()} disabled={!canPost}/>
               <button className="btn btn-solid" style={{flexShrink:0,padding:"10px 17px"}} onClick={send} disabled={!canPost}>SEND ↑</button>
             </div>
             <input ref={fileInputRef} type="file" style={{display:"none"}} onChange={onFileChange}/>
           </div>
+          {isMainRoom&&isMainUser&&(
+            <div style={{padding:"16px 17px",borderTop:"1px solid var(--dim)",background:"rgba(4,10,18,.92)"}}>
+              <div style={{fontFamily:"var(--disp)",fontSize:10,letterSpacing:3,color:"var(--ts)",marginBottom:10}}>PERSONALIZED ROOMS</div>
+              <div style={{display:"grid",gridTemplateColumns:"1.4fr 1fr 1fr 1fr",gap:8,marginBottom:10}}>
+                <input className="inp" placeholder="Room name" value={subForm.name}
+                  onChange={e=>setSubForm({...subForm,name:e.target.value})}/>
+                <select className="inp" value={subForm.type} onChange={e=>setSubForm({...subForm,type:e.target.value})}>
+                  {["tech","design","finance","research","aiml","devops"].map(t=><option key={t} value={t}>{t.toUpperCase()}</option>)}
+                </select>
+                <select className="inp" value={subForm.access} onChange={e=>setSubForm({...subForm,access:e.target.value})}>
+                  {["private","public"].map(a=><option key={a} value={a}>{a.toUpperCase()}</option>)}
+                </select>
+                <select className="inp" value={subForm.leaderId} onChange={e=>setSubForm({...subForm,leaderId:e.target.value})}>
+                  <option value="">Assign Leader</option>
+                  {allUsers.filter(u=>u.role!=="admin").map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:10}}>
+                {allUsers.filter(u=>u.role!=="admin").map(u=>(
+                  <label key={u.id} style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",display:"flex",alignItems:"center",gap:6}}>
+                    <input type="checkbox" checked={subForm.members.includes(u.id)}
+                      onChange={e=>setSubForm(s=>({...s,members:e.target.checked?[...s.members,u.id]:s.members.filter(id=>id!==u.id)}))}/>
+                    {u.name}
+                  </label>
+                ))}
+              </div>
+              <div style={{display:"flex",gap:8,marginBottom:12}}>
+                <input className="inp" placeholder="Add new member name" value={newMember}
+                  onChange={e=>setNewMember(e.target.value)}/>
+                <button className="btn" onClick={addMemberByName}>ADD</button>
+                <button className="btn btn-solid" onClick={createSubroom} disabled={!subForm.name||!subForm.leaderId}>CREATE ROOM</button>
+              </div>
+              {subrooms.length===0?(
+                <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--tm)"}}>No personalized rooms yet.</div>
+              ):(
+                <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
+                  {subrooms.map(sr=>(
+                    <div key={sr.id} style={{border:"1px solid var(--dim)",padding:"10px 12px",borderRadius:2}}>
+                      <div style={{fontFamily:"var(--ui)",fontWeight:700,fontSize:11,marginBottom:6}}>{sr.icon} {sr.name}</div>
+                      <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--tm)",marginBottom:6}}>
+                        {sr.type.toUpperCase()} · {sr.access.toUpperCase()}
+                      </div>
+                      <div style={{display:"flex",gap:6,marginBottom:6}}>
+                        <select className="inp" onChange={e=>e.target.value&&assignLeader(sr.id,e.target.value)} defaultValue="">
+                          <option value="">Assign leader</option>
+                          {allUsers.filter(u=>u.role!=="admin").map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
+                        </select>
+                        <select className="inp" onChange={e=>e.target.value&&assignMember(sr.id,e.target.value)} defaultValue="">
+                          <option value="">Assign member</option>
+                          {allUsers.filter(u=>u.role!=="admin").map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
+                        </select>
+                      </div>
+                      <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--ts)"}}>
+                        Leader: {sr.leaders.map(l=>l.name.split(" ")[0]).join(",")||"None"} · Members: {sr.members.length}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div style={{width:185,background:"rgba(4,10,18,.96)",borderLeft:"1px solid var(--dim)",flexShrink:0}}>
           <div style={{padding:"13px 13px 9px",borderBottom:"1px solid var(--dim)"}}>
@@ -1146,71 +1476,52 @@ const AdminView=({user,rooms,setRooms,allUsers,setAllUsers,onApprove,onReject,on
   const members=allUsers.filter(u=>u.role!=="admin");
   const approve=async(roomId,userId)=>{
     if(onApprove){await onApprove(roomId,userId);return;}
-    const u=allUsers.find(u=>u.id===userId);if(!u)return;
-    setRooms(rs=>rs.map(r=>r.id===roomId?{...r,pending:r.pending.filter(p=>p.id!==userId),members:[...r.members,u]}:r));
+    await apiFetch(`/rooms/${roomId}/approve`,{method:"POST",body:JSON.stringify({userId})});
+    const data=await apiFetch("/rooms");
+    setRooms(normalizeRooms(data.rooms||[]));
   };
   const reject=async(roomId,userId)=>{
     if(onReject){await onReject(roomId,userId);return;}
-    setRooms(rs=>rs.map(r=>r.id===roomId?{...r,pending:r.pending.filter(p=>p.id!==userId)}:r));
+    await apiFetch(`/rooms/${roomId}/reject`,{method:"POST",body:JSON.stringify({userId})});
+    const data=await apiFetch("/rooms");
+    setRooms(normalizeRooms(data.rooms||[]));
   };
   const assignLeader=async(roomId,userId)=>{
     if(onAssignLeader){await onAssignLeader(roomId,userId);return;}
-    const u=allUsers.find(u=>u.id===userId);if(!u)return;
-    setRooms(rs=>{
-      const parentId=rs.find(x=>x.id===roomId)?.parentId;
-      return rs.map(r=>{
-        if(r.id===roomId||r.id===parentId){
-          return {...r,leaders:r.leaders.find(l=>l.id===userId)?r.leaders:[...r.leaders,u]};
-        }
-        return r;
-      });
-    });
+    await apiFetch(`/rooms/${roomId}/assign-leader`,{method:"POST",body:JSON.stringify({userId})});
+    const data=await apiFetch("/rooms");
+    setRooms(normalizeRooms(data.rooms||[]));
   };
   const assignMember=(roomId,userId)=>{
-    const u=allUsers.find(u=>u.id===userId);if(!u)return;
-    setRooms(rs=>{
-      const parentId=rs.find(x=>x.id===roomId)?.parentId;
-      return rs.map(r=>{
-        if(r.id===roomId||r.id===parentId){
-          return {...r,members:r.members.find(m=>m.id===userId)?r.members:[...r.members,u]};
-        }
-        return r;
-      });
+    apiFetch(`/rooms/${roomId}/assign-member`,{method:"POST",body:JSON.stringify({userId})}).then(async()=>{
+      const data=await apiFetch("/rooms");
+      setRooms(data.rooms||[]);
     });
   };
   const addMemberByName=(name)=>{
-    const id="u_"+Date.now()+"_"+Math.random().toString(36).slice(2,5);
-    const email=name.toLowerCase().replace(/[^a-z0-9]+/g,".").replace(/(^\\.|\\.$)/g,"") + "@cipher.local";
-    const u={id,email,password:"member123",name,role:"member",avatar:"👤"};
-    if(setAllUsers)setAllUsers(us=>[...us,u]);
-    return u;
-  };
-  const createSubroom=(mainRoomId,form)=>{
-    setRooms(rs=>{
-      const main=rs.find(r=>r.id===mainRoomId);
-      if(!main)return rs;
-      const room={
-        id:"room_"+Date.now()+"_"+Math.random().toString(36).slice(2,5),
-        parentId:mainRoomId,
-        createdBy:main.createdBy,
-        name:form.name,
-        type:form.type,
-        icon:{tech:"⚛",design:"◇",finance:"◈",research:"⬡",aiml:"🧠",devops:"⬟"}[form.type]||"⬡",
-        access:form.access||"private",
-        description:form.description||"",
-        code:Math.random().toString(36).slice(2,8).toUpperCase(),
-        active:true,
-        leaders:[],
-        members:[],
-        pending:[],
-        messages:[],
-        createdAt:new Date().toLocaleString(),
-      };
-      return [...rs,room];
+    const username=window.prompt("Set username for new member");
+    if(!username)return null;
+    const password=window.prompt("Set password for new member");
+    if(!password)return null;
+    return apiFetch("/users",{method:"POST",body:JSON.stringify({name,username,password,role:"member"})}).then(data=>{
+      if(setAllUsers)setAllUsers(us=>[data.user,...us]);
+      return data.user;
     });
+  };
+  const createSubroom=async(mainRoomId,form)=>{
+    const keyB64=await genKey();
+    await apiFetch(`/rooms/${mainRoomId}/subroom`,{
+      method:"POST",
+      body:JSON.stringify({name:form.name,type:form.type,access:form.access,encrypted:true,encKey:keyB64})
+    });
+    const data=await apiFetch("/rooms");
+    setRooms(data.rooms||[]);
   };
   const changeRole=async(userId,role)=>{
     if(onRoleChange){await onRoleChange(userId,role);return;}
+    await apiFetch(`/users/${userId}/role`,{method:"POST",body:JSON.stringify({role})});
+    const data=await apiFetch("/users");
+    setAllUsers(data.users||[]);
   };
   const allPending=rooms
     .filter(r=>r.createdBy===user.id)
@@ -1352,9 +1663,11 @@ const AdminView=({user,rooms,setRooms,allUsers,setAllUsers,onApprove,onReject,on
                                   <button className="btn" onClick={()=>{
                                     const val=subForms["add_"+sr.id];
                                     if(!val?.trim())return;
-                                    const u=addMemberByName(val.trim());
-                                    assignMember(sr.id,u.id);
-                                    setSubForms(s=>({...s,["add_"+sr.id]:""}));
+                                    Promise.resolve(addMemberByName(val.trim())).then(u=>{
+                                      if(!u)return;
+                                      assignMember(sr.id,u.id);
+                                      setSubForms(s=>({...s,["add_"+sr.id]:""}));
+                                    });
                                   }}>ADD</button>
                                 </div>
                               </>
@@ -1381,7 +1694,7 @@ const AdminView=({user,rooms,setRooms,allUsers,setAllUsers,onApprove,onReject,on
                     <div style={{width:22,height:22,borderRadius:3,background:"var(--elevated)",display:"flex",alignItems:"center",justifyContent:"center"}}>{u.avatar}</div>
                     <div style={{minWidth:0}}>
                       <div style={{fontFamily:"var(--ui)",fontWeight:700,fontSize:11,color:"var(--tx)"}}>{u.name}</div>
-                      <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--ts)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.email}</div>
+                      <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--ts)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.username}</div>
                     </div>
                   </div>
                   <select onChange={e=>e.target.value&&changeRole(u.id,e.target.value)} defaultValue={u.role}
@@ -1429,115 +1742,6 @@ const AdminView=({user,rooms,setRooms,allUsers,setAllUsers,onApprove,onReject,on
 };
 
 /* ═══════════════════════════════════════════════════════════
-   CIPHERMIND AI
-═══════════════════════════════════════════════════════════ */
-const AIView=()=>{
-  const [mod,setMod]=useState("assistant");
-  const [q,setQ]=useState("");
-  const [resp,setResp]=useState(null);
-  const [loading,setLoading]=useState(false);
-  const modules=[
-    {id:"assistant",l:"Smart Assistant",icon:"🤖"},
-    {id:"summarizer",l:"Chat Summarizer",icon:"📋"},
-    {id:"tasks",l:"Task Extractor",icon:"✅"},
-    {id:"ideas",l:"Idea Generator",icon:"💡"},
-    {id:"analyzer",l:"Team Analyzer",icon:"📊"},
-    {id:"knowledge",l:"Knowledge Base",icon:"📚"},
-  ];
-  const scores=[
-    {l:"Collaboration",v:87,c:"var(--green)"},
-    {l:"Response Rate",v:94,c:"var(--cyan)"},
-    {l:"Task Completion",v:72,c:"var(--amber)"},
-    {l:"Engagement",v:81,c:"var(--purple)"},
-  ];
-  const ask=async()=>{
-    if(!q.trim())return;
-    setLoading(true);setResp(null);
-    try{
-      const r=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
-          system:`You are CipherMind AI — sharp, cyber-themed AI assistant in CipherRooms secure collaboration platform. Be concise and insightful. Active module: ${mod}.`,
-          messages:[{role:"user",content:q}]})
-      });
-      const d=await r.json();
-      setResp(d.content?.map(b=>b.text||"").join("\n")||"No response.");
-    }catch{setResp("⚠ CipherMind unreachable.");}
-    setLoading(false);
-  };
-  return(
-    <div style={{display:"flex",height:"calc(100vh - 52px)",animation:"fadeIn .3s"}}>
-      <div style={{width:205,background:"rgba(4,10,18,.96)",borderRight:"1px solid var(--dim)",flexShrink:0}}>
-        <div style={{padding:"13px 13px 9px",borderBottom:"1px solid var(--dim)"}}>
-          <div style={{fontFamily:"var(--disp)",fontSize:9,letterSpacing:3,color:"var(--cyan)"}}>CIPHERMIND AI</div>
-          <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--tm)",marginTop:3}}>powered by Claude</div>
-        </div>
-        {modules.map(m=>(
-          <div key={m.id} onClick={()=>setMod(m.id)} style={{padding:"10px 13px",display:"flex",gap:9,alignItems:"center",
-            cursor:"pointer",background:mod===m.id?"rgba(0,255,231,.07)":"transparent",
-            borderLeft:mod===m.id?"3px solid var(--cyan)":"3px solid transparent",transition:"all .15s"}}>
-            <span style={{fontSize:14}}>{m.icon}</span>
-            <span style={{fontFamily:"var(--ui)",fontWeight:600,fontSize:12,color:mod===m.id?"var(--tx)":"var(--ts)"}}>{m.l}</span>
-          </div>
-        ))}
-      </div>
-      <div style={{flex:1,padding:22,overflowY:"auto",display:"flex",flexDirection:"column",gap:16}}>
-        <div style={{fontFamily:"var(--disp)",fontSize:13,letterSpacing:4,color:"var(--cyan)"}}>
-          {modules.find(m=>m.id===mod)?.icon} {modules.find(m=>m.id===mod)?.l.toUpperCase()}
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
-          {scores.map((s,i)=>(
-            <div key={i} className="panel" style={{padding:"12px 13px"}}>
-              <div style={{fontFamily:"var(--disp)",fontSize:22,fontWeight:700,color:s.c}}>{s.v}%</div>
-              <div style={{height:3,background:"var(--dim)",borderRadius:2,marginTop:5,marginBottom:5,overflow:"hidden"}}>
-                <div style={{height:"100%",width:s.v+"%",background:s.c,transition:"width 1.5s ease-out"}}/>
-              </div>
-              <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--tm)",letterSpacing:1}}>{s.l.toUpperCase()}</div>
-            </div>
-          ))}
-        </div>
-        <div className="panel" style={{padding:17,border:"1px solid rgba(0,255,231,.18)"}}>
-          <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--ts)",letterSpacing:2,marginBottom:9}}>ASK CIPHERMIND</div>
-          <div style={{display:"flex",gap:8}}>
-            <input className="inp" style={{flex:1}} placeholder="Ask anything..." value={q}
-              onChange={e=>setQ(e.target.value)} onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&ask()}/>
-            <button className="btn btn-solid" onClick={ask} disabled={loading||!q.trim()} style={{flexShrink:0}}>
-              {loading?"...":"ASK →"}
-            </button>
-          </div>
-          {loading&&(
-            <div style={{marginTop:13,display:"flex",alignItems:"center",gap:9}}>
-              <div style={{width:13,height:13,border:"2px solid var(--cyan)",borderTopColor:"transparent",borderRadius:"50%",animation:"spin .7s linear infinite"}}/>
-              <span style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--ts)",animation:"pulse 1s infinite"}}>PROCESSING...</span>
-            </div>
-          )}
-          {resp&&(
-            <div style={{marginTop:13,padding:13,background:"rgba(0,255,231,.03)",border:"1px solid rgba(0,255,231,.12)",animation:"slideUp .4s"}}>
-              <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:9}}>
-                <span>🤖</span>
-                <span style={{fontFamily:"var(--disp)",fontSize:9,letterSpacing:2,color:"var(--cyan)"}}>CIPHERMIND RESPONSE</span>
-              </div>
-              <div style={{fontFamily:"var(--ui)",fontSize:13,color:"var(--ts)",lineHeight:1.7,whiteSpace:"pre-wrap"}}>{resp}</div>
-            </div>
-          )}
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          {[{icon:"🧠",t:"Context Memory",d:"Recalls past discussions for smarter future answers."},{icon:"⚔",t:"Conflict Detection",d:"Identifies miscommunications between teams proactively."},{icon:"📈",t:"Smart Recommendations",d:"Suggests workflow improvements from team behavior."},{icon:"🗄",t:"Knowledge Base",d:"Indexes decisions and solutions from all conversations."}].map((c,i)=>(
-            <div key={i} className="panel" style={{padding:13,cursor:"pointer",transition:"border-color .2s,box-shadow .2s"}}
-              onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--glow)";e.currentTarget.style.boxShadow="0 0 16px rgba(0,255,231,.06)"}}
-              onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--dim)";e.currentTarget.style.boxShadow="none"}}>
-              <div style={{fontSize:20,marginBottom:6}}>{c.icon}</div>
-              <div style={{fontFamily:"var(--disp)",fontSize:9,letterSpacing:2,color:"var(--tx)",marginBottom:5}}>{c.t.toUpperCase()}</div>
-              <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--tm)",lineHeight:1.6}}>{c.d}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/* ═══════════════════════════════════════════════════════════
    HISTORY VIEW
 ═══════════════════════════════════════════════════════════ */
 const HistoryView=({rooms})=>{
@@ -1554,7 +1758,7 @@ const HistoryView=({rooms})=>{
         type:r.type==="tech"||r.type==="aiml"?"standup":r.type==="finance"?"planning":r.type==="design"?"all-hands":"incident",
         dur:`${dur} min`,
         people:r.members.length+r.leaders.length,
-        summary:last.text,
+        summary:last.text || (last.cipher ? "🔒 Encrypted message" : ""),
       };
     })
     .sort((a,b)=>new Date(b.date)-new Date(a.date));
@@ -1586,7 +1790,7 @@ const HistoryView=({rooms})=>{
               <div style={{fontFamily:"var(--ui)",fontSize:12,color:"var(--ts)",lineHeight:1.6}}>{e.summary}</div>
             </div>
             <div style={{flexShrink:0,display:"flex",flexDirection:"column",gap:5,justifyContent:"center"}}>
-              {["TRANSCRIPT","AI SUMMARY"].map((b,i)=>(
+              {["TRANSCRIPT","SUMMARY"].map((b,i)=>(
                 <button key={i} style={{background:"transparent",border:"1px solid var(--dim)",
                   color:"var(--ts)",fontFamily:"var(--mono)",fontSize:8,padding:"5px 9px",
                   cursor:"pointer",borderRadius:2,transition:"all .15s",letterSpacing:1}}
@@ -1610,7 +1814,59 @@ export default function App(){
   const [view,setView]=useState("home");
   const [modal,setModal]=useState(null);
   const [rooms,setRooms]=useState([]);
-  const [allUsers,setAllUsers]=useState(USERS);
+  const [allUsers,setAllUsers]=useState([]);
+  const [bootError,setBootError]=useState("");
+  const [introKey,setIntroKey]=useState(0);
+
+  const boot=async()=>{
+    const token=localStorage.getItem("cipher_token");
+    if(!token){setPhase("login");return;}
+    try{
+      const data=await apiFetch("/auth/me");
+      setUser(data.user);
+      setPhase("app");
+    }catch{
+      localStorage.removeItem("cipher_token");
+      setPhase("login");
+    }
+  };
+
+  const normalizeRooms=(list=[])=>list.map(r=>({
+    ...r,
+    leaders:Array.isArray(r.leaders)?r.leaders:[],
+    members:Array.isArray(r.members)?r.members:[],
+    pending:Array.isArray(r.pending)?r.pending:[],
+    messages:Array.isArray(r.messages)?r.messages:[],
+    accessGrants:Array.isArray(r.accessGrants)?r.accessGrants:[],
+    pendingAccess:Array.isArray(r.pendingAccess)?r.pendingAccess:[],
+    pinned:Array.isArray(r.pinned)?r.pinned:[],
+  }));
+  const loadRooms=async()=>{
+    try{
+      const data=await apiFetch("/rooms");
+      setRooms(normalizeRooms(data.rooms||[]));
+      setBootError("");
+    }catch(e){
+      setBootError(e.message||"Failed to load rooms");
+    }
+  };
+  useEffect(()=>{
+    if(!user)return;
+    loadRooms();
+  },[user]);
+
+  useEffect(()=>{
+    if(!user||user.role!=="admin")return;
+    const load=async()=>{
+      try{
+        const data=await apiFetch("/users");
+        setAllUsers(data.users||[]);
+      }catch{
+        setAllUsers([]);
+      }
+    };
+    load();
+  },[user]);
 
   return(
     <>
@@ -1618,20 +1874,28 @@ export default function App(){
       <div style={{pointerEvents:"none",position:"fixed",inset:0,zIndex:9999,
         background:"repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.03) 2px,rgba(0,0,0,.03) 4px)"}}/>
 
-      {phase==="intro"&&<Intro onDone={()=>setPhase("login")}/>}
-      {phase==="login"&&<Login onLogin={u=>{setUser(u);setPhase("app");}}/>}
+      {phase==="intro"&&<Intro key={introKey} onDone={boot}/>}
+      {phase==="login"&&<Login onLogin={u=>{setUser(u);setPhase("app");}} onReplayIntro={()=>{
+        setPhase("intro");setIntroKey(k=>k+1);
+      }}/>}
 
       {phase==="app"&&user&&(
         <div style={{width:"100vw",height:"100vh",display:"flex",flexDirection:"column",overflow:"hidden",position:"relative"}}>
           <CircuitBg/><HexGrid/><ScanLine/>
           <TopBar view={view} setView={setView} user={user} onLogout={()=>{
+            localStorage.removeItem("cipher_token");
             setUser(null);setRooms([]);setView("home");setPhase("login");
           }}/>
           <div style={{flex:1,overflow:"hidden",position:"relative",zIndex:5}}>
+            {bootError&&(
+              <div style={{position:"absolute",top:12,right:12,background:"rgba(255,45,85,.15)",border:"1px solid rgba(255,45,85,.35)",
+                padding:"8px 10px",fontFamily:"var(--mono)",fontSize:9,color:"var(--red)",zIndex:99}}>
+                {bootError}
+              </div>
+            )}
             {view==="home"    &&<HomeScreen user={user} rooms={rooms} setView={setView} setModal={setModal}/>}
-            {view==="rooms"   &&<RoomsView user={user} rooms={rooms} setRooms={setRooms}/>}
+            {view==="rooms"   &&<RoomsView user={user} rooms={rooms} setRooms={setRooms} allUsers={allUsers} setAllUsers={setAllUsers} onReload={loadRooms}/>}
             {view==="history" &&<HistoryView rooms={rooms}/>}
-            {view==="ai"      &&<AIView/>}
             {view==="admin"   &&user.role==="admin"&&(
               <AdminView
                 user={user}
@@ -1646,52 +1910,41 @@ export default function App(){
       )}
 
       {modal==="create"&&user&&(
-        <CreateRoomModal onClose={()=>setModal(null)} allUsers={allUsers} onAddMember={(name)=>{
-          const id="u_"+Date.now()+"_"+Math.random().toString(36).slice(2,5);
-          const email=name.toLowerCase().replace(/[^a-z0-9]+/g,".").replace(/(^\\.|\\.$)/g,"") + "@cipher.local";
-          const u={id,email,password:"member123",name,role:"member",avatar:"👤"};
-          setAllUsers(us=>[...us,u]);
-          return u;
-        }} onCreate={async(payload)=>{
-          const iconMap={tech:"⚛",design:"◇",finance:"◈",research:"⬡",aiml:"🧠",devops:"⬟"};
-          const room={
-            id:"room_"+Date.now(),
-            parentId:null,
-            createdBy:user.id,
-            name:payload.name,
-            type:payload.type,
-            icon:iconMap[payload.type]||"⬡",
-            access:payload.access,
-            description:payload.description||"",
-            code:Math.random().toString(36).slice(2,8).toUpperCase(),
-            active:true,
-            leaders:[user,...(payload.leaders||[])],
-            members:[...(payload.members||[])],
-            pending:[],
-            messages:[],
-            createdAt:new Date().toLocaleString(),
-          };
-          setRooms(rs=>[...rs,room]);
-          return room;
-        }}/>
+        <CreateRoomModal
+          onClose={()=>setModal(null)}
+          allUsers={allUsers}
+          onAddMember={async(name)=>{
+            const username=window.prompt("Set username for new member");
+            if(!username)return null;
+            const password=window.prompt("Set password for new member");
+            if(!password)return null;
+            const data=await apiFetch("/users",{method:"POST",body:JSON.stringify({name,username,password,role:"member"})});
+            setAllUsers(us=>[data.user,...us]);
+            return data.user;
+          }}
+          onCreate={async(payload)=>{
+            const data=await apiFetch("/rooms",{method:"POST",body:JSON.stringify({
+              name:payload.name,type:payload.type,access:payload.access,description:payload.description
+            })});
+            const room=data.room;
+            for(const l of (payload.leaders||[])){
+              await apiFetch(`/rooms/${room.id}/assign-leader`,{method:"POST",body:JSON.stringify({userId:l.id})});
+            }
+            for(const m of (payload.members||[])){
+              await apiFetch(`/rooms/${room.id}/assign-member`,{method:"POST",body:JSON.stringify({userId:m.id})});
+            }
+            const fresh=await apiFetch("/rooms");
+            setRooms(fresh.rooms||[]);
+            return room;
+          }}
+        />
       )}
       {modal==="join"&&(
         <JoinRoomModal onClose={()=>setModal(null)}
           onRequest={async(code)=>{
-            let found=false;
-            setRooms(rs=>rs.map(r=>{
-              if(r.code===code.toUpperCase()){
-                found=true;
-                if(r.parentId)return r;
-                if(!r.pending.find(p=>p.id===user.id)&&!r.members.find(m=>m.id===user.id)&&!r.leaders.find(l=>l.id===user.id)){
-                  return {...r,pending:[...r.pending,user]};
-                }
-              }
-              return r;
-            }));
-            if(!found)throw new Error("No room found with that code.");
-            const target=rooms.find(r=>r.code===code.toUpperCase());
-            if(target?.parentId)throw new Error("Only main rooms accept join requests.");
+            await apiFetch("/rooms/join",{method:"POST",body:JSON.stringify({code})});
+            const data=await apiFetch("/rooms");
+            setRooms(data.rooms||[]);
           }}/>
       )}
     </>
