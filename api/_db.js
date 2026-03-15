@@ -12,6 +12,7 @@ export const ensureSchema = async () => {
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      username TEXT UNIQUE,
       email TEXT UNIQUE NOT NULL,
       role TEXT NOT NULL,
       avatar TEXT NOT NULL,
@@ -21,12 +22,14 @@ export const ensureSchema = async () => {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT UNIQUE`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT UNIQUE`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_hash TEXT`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMPTZ`;
   await sql`
     CREATE TABLE IF NOT EXISTS rooms (
       id TEXT PRIMARY KEY,
+      parent_id TEXT,
       name TEXT NOT NULL,
       type TEXT NOT NULL,
       icon TEXT NOT NULL,
@@ -34,6 +37,11 @@ export const ensureSchema = async () => {
       description TEXT NOT NULL,
       code TEXT UNIQUE NOT NULL,
       active BOOLEAN NOT NULL DEFAULT TRUE,
+      encrypted BOOLEAN NOT NULL DEFAULT FALSE,
+      enc_key TEXT,
+      access_grants JSONB NOT NULL DEFAULT '[]'::jsonb,
+      pending_access JSONB NOT NULL DEFAULT '[]'::jsonb,
+      pinned JSONB NOT NULL DEFAULT '[]'::jsonb,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       created_by TEXT NOT NULL REFERENCES users(id),
       leaders JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -42,6 +50,12 @@ export const ensureSchema = async () => {
       messages JSONB NOT NULL DEFAULT '[]'::jsonb
     );
   `;
+  await sql`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS parent_id TEXT`;
+  await sql`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS encrypted BOOLEAN NOT NULL DEFAULT FALSE`;
+  await sql`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS enc_key TEXT`;
+  await sql`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS access_grants JSONB NOT NULL DEFAULT '[]'::jsonb`;
+  await sql`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS pending_access JSONB NOT NULL DEFAULT '[]'::jsonb`;
+  await sql`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS pinned JSONB NOT NULL DEFAULT '[]'::jsonb`;
 };
 
 export const nowIso = () => new Date().toISOString();
@@ -52,6 +66,7 @@ export const makeCode = () => Math.random().toString(36).slice(2, 8).toUpperCase
 export const safeUser = (u) => ({
   id: u.id,
   name: u.name,
+  username: u.username,
   email: u.email,
   role: u.role,
   avatar: u.avatar,
@@ -64,6 +79,10 @@ export const getUserById = async (id) => {
 
 export const getUserByEmail = async (email) => {
   const { rows } = await sql`SELECT * FROM users WHERE email = ${email} LIMIT 1`;
+  return rows[0] || null;
+};
+export const getUserByUsername = async (username) => {
+  const { rows } = await sql`SELECT * FROM users WHERE username = ${username} LIMIT 1`;
   return rows[0] || null;
 };
 
@@ -127,6 +146,9 @@ export const toRoomPayload = async (room) => {
   const leaders = Array.isArray(room.leaders) ? room.leaders : [];
   const members = Array.isArray(room.members) ? room.members : [];
   const pending = Array.isArray(room.pending) ? room.pending : [];
+  const accessGrants = Array.isArray(room.access_grants) ? room.access_grants : [];
+  const pendingAccess = Array.isArray(room.pending_access) ? room.pending_access : [];
+  const pinned = Array.isArray(room.pinned) ? room.pinned : [];
 
   const leaderRows = leaders.length
     ? (await sql`SELECT * FROM users WHERE id = ANY(${leaders})`).rows
@@ -137,9 +159,13 @@ export const toRoomPayload = async (room) => {
   const pendingRows = pending.length
     ? (await sql`SELECT * FROM users WHERE id = ANY(${pending})`).rows
     : [];
+  const pendingAccessRows = pendingAccess.length
+    ? (await sql`SELECT * FROM users WHERE id = ANY(${pendingAccess})`).rows
+    : [];
 
   return {
     id: room.id,
+    parentId: room.parent_id || null,
     name: room.name,
     type: room.type,
     icon: room.icon,
@@ -148,6 +174,12 @@ export const toRoomPayload = async (room) => {
     code: room.code,
     active: room.active,
     createdAt: room.created_at,
+    createdBy: room.created_by,
+    encrypted: room.encrypted,
+    encKey: room.enc_key || null,
+    accessGrants,
+    pendingAccess: pendingAccessRows.map(safeUser),
+    pinned,
     leaders: leaderRows.map(safeUser),
     members: memberRows.map(safeUser),
     pending: pendingRows.map(safeUser),

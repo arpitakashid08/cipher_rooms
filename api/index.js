@@ -3,6 +3,7 @@ import {
   ensureSchema,
   countUsers,
   getUserByEmail,
+  getUserByUsername,
   getUserById,
   hashPassword,
   comparePassword,
@@ -35,38 +36,49 @@ export default async function handler(req, res) {
   // Auth: Register
   if (req.method === "POST" && path === "/auth/register") {
     if (!rateLimit(req, res, { key: "register", limit: 10, windowMs: 15 * 60 * 1000 })) return;
-    const { name, email, password } = req.body || {};
-    if (!name || !email || !password) return json(res, 400, { error: "Missing fields" });
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email))) return json(res, 400, { error: "Invalid email" });
+    const { name, email, username, password } = req.body || {};
+    if (!name || !password || (!email && !username)) return json(res, 400, { error: "Missing fields" });
+    const finalUsername = username ? String(username).trim() : null;
+    const finalEmail = email
+      ? String(email).toLowerCase()
+      : finalUsername
+      ? `${finalUsername}@cipher.local`
+      : null;
+    if (!finalEmail) return json(res, 400, { error: "Email required" });
     if (String(name).trim().length < 2) return json(res, 400, { error: "Name is too short" });
     if (String(password).length < 6) return json(res, 400, { error: "Password must be at least 6 characters" });
-    const existing = await getUserByEmail(String(email).toLowerCase());
-    if (existing) return json(res, 409, { error: "Email already exists" });
+    const existingEmail = await getUserByEmail(finalEmail);
+    const existingUsername = finalUsername ? await getUserByUsername(finalUsername) : null;
+    if (existingEmail || existingUsername) return json(res, 409, { error: "User already exists" });
     const isFirst = (await countUsers()) === 0;
     const role = isFirst ? "admin" : "member";
     const avatar = role === "admin" ? "👑" : "👤";
     const id = `u_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const passwordHash = await hashPassword(password);
     await sql`
-      INSERT INTO users (id, name, email, role, avatar, password_hash, created_at)
-      VALUES (${id}, ${name.trim()}, ${String(email).toLowerCase()}, ${role}, ${avatar}, ${passwordHash}, NOW())
+      INSERT INTO users (id, name, username, email, role, avatar, password_hash, created_at)
+      VALUES (${id}, ${name.trim()}, ${finalUsername}, ${finalEmail}, ${role}, ${avatar}, ${passwordHash}, NOW())
     `;
-    setSessionCookie(res, signToken(id));
+    const token = signToken(id);
+    setSessionCookie(res, token);
     const user = await getUserById(id);
-    return json(res, 200, { user: safeUser(user) });
+    return json(res, 200, { token, user: safeUser(user) });
   }
 
   // Auth: Login
   if (req.method === "POST" && path === "/auth/login") {
     if (!rateLimit(req, res, { key: "login", limit: 10, windowMs: 15 * 60 * 1000 })) return;
-    const { email, password } = req.body || {};
-    if (!email || !password) return json(res, 400, { error: "Missing credentials" });
-    const user = await getUserByEmail(String(email).toLowerCase());
+    const { email, username, password } = req.body || {};
+    if ((!email && !username) || !password) return json(res, 400, { error: "Missing credentials" });
+    const user = email
+      ? await getUserByEmail(String(email).toLowerCase())
+      : await getUserByUsername(String(username).trim());
     if (!user) return json(res, 401, { error: "Invalid credentials" });
     const ok = await comparePassword(password, user.password_hash);
     if (!ok) return json(res, 401, { error: "Invalid credentials" });
-    setSessionCookie(res, signToken(user.id));
-    return json(res, 200, { user: safeUser(user) });
+    const token = signToken(user.id);
+    setSessionCookie(res, token);
+    return json(res, 200, { token, user: safeUser(user) });
   }
 
   // Auth: Me
@@ -162,6 +174,26 @@ export default async function handler(req, res) {
     const { rows } = await sql`SELECT * FROM users ORDER BY created_at DESC`;
     return json(res, 200, { users: rows.map(safeUser) });
   }
+  if (req.method === "POST" && path === "/users") {
+    const user = await authUser(req, res);
+    if (!user) return;
+    if (user.role !== "admin") return json(res, 403, { error: "Admin only" });
+    const { name, username, password, role } = req.body || {};
+    if (!name || !username || !password) return json(res, 400, { error: "Missing fields" });
+    const existing = await getUserByUsername(String(username).trim());
+    if (existing) return json(res, 409, { error: "Username already exists" });
+    const userRole = role && ["admin", "leader", "member"].includes(role) ? role : "member";
+    const avatar = userRole === "admin" ? "👑" : userRole === "leader" ? "⬡" : "👤";
+    const id = `u_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const passwordHash = await hashPassword(password);
+    const email = `${String(username).trim()}@cipher.local`;
+    await sql`
+      INSERT INTO users (id, name, username, email, role, avatar, password_hash, created_at)
+      VALUES (${id}, ${name.trim()}, ${String(username).trim()}, ${email}, ${userRole}, ${avatar}, ${passwordHash}, NOW())
+    `;
+    const created = await getUserById(id);
+    return json(res, 200, { user: safeUser(created) });
+  }
 
   // Users: role update (admin)
   const roleMatch = path.match(/^\/users\/([^/]+)\/role$/);
@@ -205,8 +237,9 @@ export default async function handler(req, res) {
     const roomType = type || "tech";
     const icon = iconMap[roomType] || "⬡";
     await sql`
-      INSERT INTO rooms (id, name, type, icon, access, description, code, active, created_at, created_by, leaders, members, pending, messages)
-      VALUES (${id}, ${name}, ${roomType}, ${icon}, ${access || "private"}, ${description || ""}, ${code}, true, NOW(), ${user.id},
+      INSERT INTO rooms (id, parent_id, name, type, icon, access, description, code, active, encrypted, enc_key, access_grants, pending_access, pinned, created_at, created_by, leaders, members, pending, messages)
+      VALUES (${id}, ${null}, ${name}, ${roomType}, ${icon}, ${access || "private"}, ${description || ""}, ${code}, true, false, ${null},
+        ${JSON.stringify([])}, ${JSON.stringify([])}, ${JSON.stringify([])}, NOW(), ${user.id},
         ${JSON.stringify([])}, ${JSON.stringify([])}, ${JSON.stringify([])}, ${JSON.stringify([])})
     `;
     const { rows } = await sql`SELECT * FROM rooms WHERE id = ${id} LIMIT 1`;
@@ -238,13 +271,14 @@ export default async function handler(req, res) {
   const approveMatch = path.match(/^\/rooms\/([^/]+)\/approve$/);
   const rejectMatch = path.match(/^\/rooms\/([^/]+)\/reject$/);
   const leaderMatch = path.match(/^\/rooms\/([^/]+)\/assign-leader$/);
-  if (req.method === "POST" && (approveMatch || rejectMatch || leaderMatch)) {
+  const memberMatch = path.match(/^\/rooms\/([^/]+)\/assign-member$/);
+  if (req.method === "POST" && (approveMatch || rejectMatch || leaderMatch || memberMatch)) {
     const user = await authUser(req, res);
     if (!user) return;
     if (user.role !== "admin") return json(res, 403, { error: "Admin only" });
     const { userId } = req.body || {};
     if (!userId) return json(res, 400, { error: "User ID required" });
-    const roomId = (approveMatch || rejectMatch || leaderMatch)[1];
+    const roomId = (approveMatch || rejectMatch || leaderMatch || memberMatch)[1];
     const { rows } = await sql`SELECT * FROM rooms WHERE id = ${roomId} LIMIT 1`;
     const room = rows[0];
     if (!room) return json(res, 404, { error: "Room not found" });
@@ -262,7 +296,108 @@ export default async function handler(req, res) {
       if (!leaders.includes(userId)) leaders.push(userId);
       if (!members.includes(userId)) members.push(userId);
       await sql`UPDATE rooms SET leaders = ${JSON.stringify(leaders)}, members = ${JSON.stringify(members)} WHERE id = ${room.id}`;
+    } else if (memberMatch) {
+      if (!members.includes(userId)) members.push(userId);
+      const grants = room.access_grants || [];
+      if (!grants.includes(userId)) grants.push(userId);
+      await sql`UPDATE rooms SET members = ${JSON.stringify(members)}, access_grants = ${JSON.stringify(grants)} WHERE id = ${room.id}`;
     }
+    const updated = (await sql`SELECT * FROM rooms WHERE id = ${room.id} LIMIT 1`).rows[0];
+    return json(res, 200, { room: await toRoomPayload(updated) });
+  }
+
+  const subroomMatch = path.match(/^\/rooms\/([^/]+)\/subroom$/);
+  if (req.method === "POST" && subroomMatch) {
+    const user = await authUser(req, res);
+    if (!user) return;
+    if (user.role !== "admin") return json(res, 403, { error: "Admin only" });
+    const { name, type, access, leaderId, memberIds, encrypted, encKey } = req.body || {};
+    if (!name) return json(res, 400, { error: "Room name is required" });
+    const parentId = subroomMatch[1];
+    const { rows } = await sql`SELECT * FROM rooms WHERE id = ${parentId} LIMIT 1`;
+    const parent = rows[0];
+    if (!parent) return json(res, 404, { error: "Main room not found" });
+    const id = rid();
+    const roomType = type || "tech";
+    const icon = iconMap[roomType] || "⬡";
+    const leaders = leaderId ? [leaderId] : [];
+    const members = [...leaders, ...(memberIds || [])];
+    const grants = members;
+    await sql`
+      INSERT INTO rooms (id, parent_id, name, type, icon, access, description, code, active, encrypted, enc_key, access_grants, pending_access, pinned, created_at, created_by, leaders, members, pending, messages)
+      VALUES (${id}, ${parentId}, ${name}, ${roomType}, ${icon}, ${access || "private"}, ${""}, ${makeCode()}, true, ${!!encrypted}, ${encKey || null},
+        ${JSON.stringify(grants)}, ${JSON.stringify([])}, ${JSON.stringify([])}, NOW(), ${parent.created_by},
+        ${JSON.stringify(leaders)}, ${JSON.stringify(members)}, ${JSON.stringify([])}, ${JSON.stringify([])})
+    `;
+    const updated = (await sql`SELECT * FROM rooms WHERE id = ${id} LIMIT 1`).rows[0];
+    return json(res, 200, { room: await toRoomPayload(updated) });
+  }
+
+  const requestAccessMatch = path.match(/^\/rooms\/([^/]+)\/request-access$/);
+  if (req.method === "POST" && requestAccessMatch) {
+    const user = await authUser(req, res);
+    if (!user) return;
+    const roomId = requestAccessMatch[1];
+    const { rows } = await sql`SELECT * FROM rooms WHERE id = ${roomId} LIMIT 1`;
+    const room = rows[0];
+    if (!room) return json(res, 404, { error: "Room not found" });
+    const grants = room.access_grants || [];
+    if (grants.includes(user.id)) return json(res, 200, { status: "granted" });
+    const pendingAccess = room.pending_access || [];
+    if (!pendingAccess.includes(user.id)) pendingAccess.push(user.id);
+    await sql`UPDATE rooms SET pending_access = ${JSON.stringify(pendingAccess)} WHERE id = ${room.id}`;
+    return json(res, 200, { status: "pending" });
+  }
+
+  const grantAccessMatch = path.match(/^\/rooms\/([^/]+)\/grant-access$/);
+  if (req.method === "POST" && grantAccessMatch) {
+    const user = await authUser(req, res);
+    if (!user) return;
+    if (user.role !== "admin") return json(res, 403, { error: "Admin only" });
+    const { userId } = req.body || {};
+    if (!userId) return json(res, 400, { error: "User ID required" });
+    const roomId = grantAccessMatch[1];
+    const { rows } = await sql`SELECT * FROM rooms WHERE id = ${roomId} LIMIT 1`;
+    const room = rows[0];
+    if (!room) return json(res, 404, { error: "Room not found" });
+    const pendingAccess = (room.pending_access || []).filter((id) => id !== userId);
+    const grants = room.access_grants || [];
+    if (!grants.includes(userId)) grants.push(userId);
+    await sql`UPDATE rooms SET pending_access = ${JSON.stringify(pendingAccess)}, access_grants = ${JSON.stringify(grants)} WHERE id = ${room.id}`;
+    const updated = (await sql`SELECT * FROM rooms WHERE id = ${room.id} LIMIT 1`).rows[0];
+    return json(res, 200, { room: await toRoomPayload(updated) });
+  }
+
+  const messageMatch = path.match(/^\/rooms\/([^/]+)\/message$/);
+  if (req.method === "POST" && messageMatch) {
+    const user = await authUser(req, res);
+    if (!user) return;
+    const { message } = req.body || {};
+    if (!message) return json(res, 400, { error: "Message required" });
+    const roomId = messageMatch[1];
+    const { rows } = await sql`SELECT * FROM rooms WHERE id = ${roomId} LIMIT 1`;
+    const room = rows[0];
+    if (!room) return json(res, 404, { error: "Room not found" });
+    const messages = room.messages || [];
+    messages.push(message);
+    await sql`UPDATE rooms SET messages = ${JSON.stringify(messages)} WHERE id = ${room.id}`;
+    const updated = (await sql`SELECT * FROM rooms WHERE id = ${room.id} LIMIT 1`).rows[0];
+    return json(res, 200, { room: await toRoomPayload(updated) });
+  }
+
+  const pinMatch = path.match(/^\/rooms\/([^/]+)\/pin$/);
+  if (req.method === "POST" && pinMatch) {
+    const user = await authUser(req, res);
+    if (!user) return;
+    const { messageId } = req.body || {};
+    if (!messageId) return json(res, 400, { error: "Message ID required" });
+    const roomId = pinMatch[1];
+    const { rows } = await sql`SELECT * FROM rooms WHERE id = ${roomId} LIMIT 1`;
+    const room = rows[0];
+    if (!room) return json(res, 404, { error: "Room not found" });
+    const pinned = room.pinned || [];
+    const next = pinned.includes(messageId) ? pinned.filter((id) => id !== messageId) : [messageId, ...pinned];
+    await sql`UPDATE rooms SET pinned = ${JSON.stringify(next)} WHERE id = ${room.id}`;
     const updated = (await sql`SELECT * FROM rooms WHERE id = ${room.id} LIMIT 1`).rows[0];
     return json(res, 200, { room: await toRoomPayload(updated) });
   }
