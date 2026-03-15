@@ -87,6 +87,7 @@ const iconMap = { tech: "⚛", design: "◇", finance: "◈", research: "⬡", a
 const safeUser = (u) => ({ id: u.id, username: u.username, name: u.name, role: u.role, avatar: u.avatar });
 const getUserById = (id) => db.prepare("SELECT * FROM users WHERE id = ?").get(id);
 const getUserByUsername = (username) => db.prepare("SELECT * FROM users WHERE username = ?").get(username);
+const getUserByName = (name) => db.prepare("SELECT * FROM users WHERE name = ?").get(name);
 const countUsers = () => db.prepare("SELECT COUNT(*) as c FROM users").get().c;
 
 const parseArr = (val) => {
@@ -173,7 +174,7 @@ app.post("/auth/register", async (req, res) => {
 app.post("/auth/login", async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: "Missing credentials" });
-  const u = getUserByUsername(username);
+  const u = getUserByUsername(username) || getUserByName(username);
   if (!u) return res.status(401).json({ error: "Invalid credentials" });
   const ok = await bcrypt.compare(password, u.password_hash);
   if (!ok) return res.status(401).json({ error: "Invalid credentials" });
