@@ -42,7 +42,7 @@ export default function Room() {
     fetchMessages(token);
 
     // Setup Socket
-    const newSocket = io("http://localhost:5000");
+    const newSocket = io("http://localhost:5005");
     setSocket(newSocket);
 
     newSocket.on("connect", () => {
@@ -64,7 +64,7 @@ export default function Room() {
 
   const fetchRoomData = async (token: string) => {
     try {
-      const res = await axios.get(`http://localhost:5000/api/rooms/${roomId}`, {
+      const res = await axios.get(`http://localhost:5005/api/rooms/${roomId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setRoom(res.data);
@@ -75,7 +75,7 @@ export default function Room() {
 
   const fetchMessages = async (token: string) => {
     try {
-      const res = await axios.get(`http://localhost:5000/api/messages/${roomId}`, {
+      const res = await axios.get(`http://localhost:5005/api/messages/${roomId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setMessages(res.data);
@@ -104,7 +104,7 @@ export default function Room() {
     setAiLoading(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.post(`http://localhost:5000/api/ai/summarize/${roomId}`, {}, {
+      const res = await axios.post(`http://localhost:5005/api/ai/summarize/${roomId}`, {}, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setAiResponse(`[SUMMARY]:\n${res.data.summary}`);
@@ -119,7 +119,7 @@ export default function Room() {
     setAiLoading(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.post(`http://localhost:5000/api/ai/tasks/${roomId}`, {}, {
+      const res = await axios.post(`http://localhost:5005/api/ai/tasks/${roomId}`, {}, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setAiResponse(`[ACTION ITEMS]:\n${res.data.tasks}`);
@@ -135,7 +135,7 @@ export default function Room() {
     setAiLoading(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.post(`http://localhost:5000/api/ai/ask`, { question: aiQuery }, {
+      const res = await axios.post(`http://localhost:5005/api/ai/ask`, { question: aiQuery }, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setAiResponse(`[QUERY: ${aiQuery}]\n\nRESPONSE:\n${res.data.answer}`);

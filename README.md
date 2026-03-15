@@ -23,7 +23,7 @@ Make sure you have Node.js (v18+) and MongoDB installed and running.
    *Environment Variables (server/.env)*:
    Create a `.env` file in the `server` directory:
    ```env
-   PORT=5000
+   PORT=5005
    MONGODB_URI=mongodb://127.0.0.1:27017/cipherrooms
    JWT_SECRET=your_super_secret_jwt_key
    OPENAI_API_KEY=your_openai_api_key_here
@@ -42,7 +42,7 @@ Make sure you have Node.js (v18+) and MongoDB installed and running.
    cd server
    npm run dev
    ```
-   > The backend will start on `http://localhost:5000`
+   > The backend will start on `http://localhost:5005`
 
 2. **Start Frontend**
    ```bash
@@ -63,7 +63,7 @@ Make sure you have Node.js (v18+) and MongoDB installed and running.
 1. Import the project using Vercel.
 2. Select the `client` directory as the Root Directory.
 3. Vercel will automatically detect Next.js and run the build command `npm run build`.
-4. Ensure the client code points correctly to the deployed backend URL instead of `http://localhost:5000`.
+4. Ensure the client code points correctly to the deployed backend URL instead of `http://localhost:5005`.
 
 ## Architecture Details
 - **Role Hierarchy**: MainUser > Leader > Member

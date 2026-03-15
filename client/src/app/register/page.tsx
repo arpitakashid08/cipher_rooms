@@ -16,7 +16,7 @@ export default function Register() {
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await axios.post("http://localhost:5000/api/auth/register", { name, email, password, role });
+      const res = await axios.post("http://localhost:5005/api/auth/register", { name, email, password, role });
       localStorage.setItem("token", res.data.token);
       localStorage.setItem("user", JSON.stringify(res.data.user));
       router.push("/dashboard");

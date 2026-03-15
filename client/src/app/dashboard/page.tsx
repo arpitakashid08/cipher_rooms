@@ -42,7 +42,7 @@ export default function Dashboard() {
 
   const fetchRooms = async (token: string) => {
     try {
-      const res = await axios.get("http://localhost:5000/api/rooms", {
+      const res = await axios.get("http://localhost:5005/api/rooms", {
         headers: { Authorization: `Bearer ${token}` }
       });
       setRooms(res.data);
@@ -53,7 +53,7 @@ export default function Dashboard() {
 
   const fetchUsers = async (token: string, currentUserId: string) => {
     try {
-      const res = await axios.get("http://localhost:5000/api/users", {
+      const res = await axios.get("http://localhost:5005/api/users", {
         headers: { Authorization: `Bearer ${token}` }
       });
       // Exclude current user from assign lists
@@ -69,7 +69,7 @@ export default function Dashboard() {
       const token = localStorage.getItem("token");
       const generatedName = roomNameInput.trim() || `Network-${Math.floor(Math.random()*1000)}`;
       
-      await axios.post("http://localhost:5000/api/rooms", 
+      await axios.post("http://localhost:5005/api/rooms", 
         { 
           name: generatedName, 
           isPublic: accessLevel === "public",
@@ -100,7 +100,7 @@ export default function Dashboard() {
     e.preventDefault();
     try {
       const token = localStorage.getItem("token");
-      await axios.post("http://localhost:5000/api/rooms/join", 
+      await axios.post("http://localhost:5005/api/rooms/join", 
         { code: joinCode },
         { headers: { Authorization: `Bearer ${token}` } }
       );
