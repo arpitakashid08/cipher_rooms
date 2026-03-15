@@ -50,6 +50,18 @@ CipherRooms uses a **single-server full‑stack architecture**:
 - Role‑based access ensures only authorized users see/administer rooms.  
 
 ---
+To open locally, you must start the server first:
+
+cd /Users/arpitakashidgmail.com/Desktop/serverless/cipher-app
+npm run build
+
+cd /Users/arpitakashidgmail.com/Desktop/serverless/cipher-app/server
+npm install
+npm run start
+Then open:
+
+http://localhost:5174
+
 Application will run at:
 http://localhost:5174
 
@@ -83,4 +95,5 @@ npm install
 # 6) Run server (serves frontend + backend)
 
 npm run start
+
 
